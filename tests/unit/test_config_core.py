@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from netorium.core.platform import user_config_path
+from netorium.core.platform import user_cache_dir, user_config_path, user_data_dir
 from netorium.core.settings import (
     ConfigError,
     init_config,
@@ -37,6 +37,24 @@ def test_user_config_path_uses_windows_appdata() -> None:
     )
 
     assert str(path) == "C:/Users/Admin/AppData/Roaming/Netorium/config.toml"
+
+
+def test_user_data_dir_uses_xdg_data_home() -> None:
+    path = user_data_dir(
+        platform_name="linux",
+        env={"XDG_DATA_HOME": "/tmp/netorium-data"},
+    )
+
+    assert path == Path("/tmp/netorium-data/netorium")
+
+
+def test_user_cache_dir_uses_xdg_cache_home() -> None:
+    path = user_cache_dir(
+        platform_name="linux",
+        env={"XDG_CACHE_HOME": "/tmp/netorium-cache"},
+    )
+
+    assert path == Path("/tmp/netorium-cache/netorium")
 
 
 def test_init_config_writes_valid_default_config(tmp_path: Path) -> None:

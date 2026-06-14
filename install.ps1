@@ -5,6 +5,32 @@ $GithubRef = if ($env:NETORIUM_GITHUB_REF) { $env:NETORIUM_GITHUB_REF } else { "
 $GithubRefKind = if ($env:NETORIUM_GITHUB_REF_KIND) { $env:NETORIUM_GITHUB_REF_KIND } else { "heads" }
 $PackageSpec = $env:NETORIUM_PACKAGE_SPEC
 
+function Test-PythonCommand {
+    param (
+        [string]$Command,
+        [string[]]$Arguments
+    )
+
+    & $Command @($Arguments + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)")) *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+function Get-PythonCommand {
+    $Candidates = @(
+        [pscustomobject]@{ Command = "py"; Arguments = @("-3") },
+        [pscustomobject]@{ Command = "python"; Arguments = @() },
+        [pscustomobject]@{ Command = "python3"; Arguments = @() }
+    )
+
+    foreach ($Candidate in $Candidates) {
+        if ((Get-Command $Candidate.Command -ErrorAction SilentlyContinue) -and (Test-PythonCommand $Candidate.Command $Candidate.Arguments)) {
+            return $Candidate
+        }
+    }
+
+    return $null
+}
+
 if ([string]::IsNullOrWhiteSpace($PackageSpec)) {
     switch ($InstallSource) {
         "github" {
@@ -30,7 +56,21 @@ if ([string]::IsNullOrWhiteSpace($PackageSpec)) {
 if (Get-Command pipx -ErrorAction SilentlyContinue) {
     pipx install --force $PackageSpec
 } else {
-    py -m pip install --user --upgrade $PackageSpec
+    $Python = Get-PythonCommand
+    if ($null -eq $Python) {
+        Write-Error "Python 3.11+ or pipx is required to install Netorium CLI."
+        exit 1
+    }
+
+    & $Python.Command @($Python.Arguments + @("-m", "pip", "install", "--user", "--upgrade", $PackageSpec))
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    $ScriptsDir = & $Python.Command @($Python.Arguments + @("-c", "import os, site; print(os.path.join(site.getuserbase(), 'Scripts'))")) 2>$null
+    if ($ScriptsDir -and ($env:PATH -notlike "*$ScriptsDir*")) {
+        Write-Host "If netorium is not recognized, add this directory to PATH: $ScriptsDir"
+    }
 }
 
 Write-Host "Netorium CLI installed."

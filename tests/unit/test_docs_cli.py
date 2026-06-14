@@ -21,6 +21,8 @@ def test_docs_commands_page() -> None:
     assert result.exit_code == 0
     assert "Commands" in result.output
     assert "Configuration" in result.output
+    assert "interactive mode" in result.output
+    assert "uninstall --yes --remove-data" in result.output
 
 
 def test_docs_examples_page() -> None:
@@ -29,6 +31,8 @@ def test_docs_examples_page() -> None:
     assert result.exit_code == 0
     assert "Examples" in result.output
     assert "config validate" in result.output
+    assert "netorium> version" in result.output
+    assert "netorium uninstall" in result.output
 
 
 def test_docs_install_page() -> None:

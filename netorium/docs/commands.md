@@ -3,12 +3,35 @@
 ## Base
 
 ```bash
+netorium
 netorium --help
 netorium version
 netorium doctor
+netorium uninstall
 netorium docs
 netorium docs install
 ```
+
+Running `netorium` without arguments starts interactive mode. Inside it, use the
+same commands without the `netorium` prefix:
+
+```text
+netorium> version
+netorium> config path
+netorium> exit
+```
+
+## Uninstall
+
+```bash
+netorium uninstall
+netorium uninstall --yes
+netorium uninstall --yes --remove-data
+```
+
+`netorium uninstall` is a dry-run by default. Use `--yes` to remove the installed
+package. Add `--remove-data` only when you also want to remove Netorium user
+configuration, local data, and cache directories.
 
 ## Configuration
 

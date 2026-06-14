@@ -1,5 +1,14 @@
 # Examples
 
+Start interactive mode and run commands without repeating the `netorium` prefix:
+
+```text
+netorium
+netorium> version
+netorium> config path
+netorium> exit
+```
+
 Create and validate a local configuration file:
 
 ```bash
@@ -23,6 +32,13 @@ Check local CLI health:
 
 ```bash
 netorium doctor --verbose
+```
+
+Preview uninstall and then remove Netorium completely:
+
+```bash
+netorium uninstall
+netorium uninstall --yes --remove-data
 ```
 
 Check for a newer release:

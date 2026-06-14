@@ -1,0 +1,45 @@
+AGENTS.md
+CODEX_TASKS.md
+README_CODEX.md
+README_STARTER.md
+TECH_SPEC_EN.md
+TECH_SPEC_RU.md
+pyproject_example.toml
+DEPLOYMENT_EN.md
+DEPLOYMENT_RU.md
+PROMPT_FOR_CODEX.md
+
+# Codex / local agent notes
+CODEX_WORKLOG.md
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Packaging and build outputs
+*.egg-info/
+.eggs/
+build/
+dist/
+site/
+
+# Local editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

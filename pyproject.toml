@@ -1,0 +1,40 @@
+[project]
+name = "netgate-cli"
+version = "0.1.0"
+description = "Cross-platform CLI for building-level network access control."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "NetGate Contributors" }]
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.7",
+  "requests>=2.32",
+  "ldap3>=2.9",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "pre-commit>=3.7",
+]
+
+[project.scripts]
+netgate = "netgate.cli.app:app"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

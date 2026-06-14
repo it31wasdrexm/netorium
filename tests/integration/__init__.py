@@ -1,1 +1,1 @@
-"""Integration tests for NetGate."""
+"""Integration tests for Netorium."""

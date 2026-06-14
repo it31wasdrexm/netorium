@@ -1,1 +1,1 @@
-"""Test package for NetGate."""
+"""Test package for Netorium."""

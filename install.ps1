@@ -1,4 +1,4 @@
-$PackageName = "netgate-cli"
+$PackageName = "netorium-cli"
 
 if (Get-Command pipx -ErrorAction SilentlyContinue) {
     pipx install $PackageName
@@ -6,5 +6,5 @@ if (Get-Command pipx -ErrorAction SilentlyContinue) {
     py -m pip install --user $PackageName
 }
 
-Write-Host "NetGate CLI installed."
-Write-Host "Run: netgate --help"
+Write-Host "Netorium CLI installed."
+Write-Host "Run: netorium --help"

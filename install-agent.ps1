@@ -1,7 +1,7 @@
-# NetGate Agent installer draft for Windows.
+# Netorium Agent installer draft for Windows.
 # This is a template. Real implementation must verify package signatures/checksums.
 
-$PackageName = "netgate-cli"
+$PackageName = "netorium-cli"
 
 if (Get-Command pipx -ErrorAction SilentlyContinue) {
     pipx install $PackageName
@@ -9,6 +9,6 @@ if (Get-Command pipx -ErrorAction SilentlyContinue) {
     py -m pip install --user $PackageName
 }
 
-Write-Host "NetGate Agent installed."
+Write-Host "Netorium Agent installed."
 Write-Host "Next:"
-Write-Host "  netgate-agent enroll --controller https://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"
+Write-Host "  netorium-agent enroll --controller https://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"

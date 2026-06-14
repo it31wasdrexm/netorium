@@ -1,1 +1,1 @@
-"""Unit tests for NetGate."""
+"""Unit tests for Netorium."""

@@ -1,11 +1,11 @@
 [project]
-name = "netgate-cli"
+name = "netorium-cli"
 version = "0.1.0"
 description = "Cross-platform CLI for building-level network access control."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "NetGate Contributors" }]
+authors = [{ name = "Netorium Contributors" }]
 dependencies = [
   "typer>=0.12",
   "rich>=13.7",
@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-netgate = "netgate.cli.app:app"
+netorium = "netorium.cli.app:app"
 
 [tool.ruff]
 line-length = 100

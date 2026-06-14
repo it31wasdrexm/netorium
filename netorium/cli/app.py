@@ -3,21 +3,24 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from netgate.core.metadata import APP_NAME, get_version
+from netorium.cli.commands.config import config_app
+from netorium.core.metadata import APP_NAME, get_version
 
 console = Console()
 
 app = typer.Typer(
-    name="netgate",
-    help="NetGate CLI for building-level network access control.",
+    name="netorium",
+    help="Netorium CLI for building-level network access control.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
 
+app.add_typer(config_app, name="config")
+
 
 @app.command()
 def version() -> None:
-    """Show the installed NetGate CLI version."""
+    """Show the installed Netorium CLI version."""
     console.print(f"{APP_NAME} {get_version()}")
 
 

@@ -34,6 +34,12 @@ def examples() -> None:
     render_doc_page("examples")
 
 
+@docs_app.command("install")
+def install() -> None:
+    """Show installation instructions."""
+    render_doc_page("install")
+
+
 @docs_app.command("troubleshooting")
 def troubleshooting() -> None:
     """Show troubleshooting notes."""

@@ -31,6 +31,14 @@ def test_docs_examples_page() -> None:
     assert "config validate" in result.output
 
 
+def test_docs_install_page() -> None:
+    result = runner.invoke(app, ["docs", "install"])
+
+    assert result.exit_code == 0
+    assert "Installation" in result.output
+    assert "NETORIUM_GITHUB_REPO" in result.output
+
+
 def test_docs_troubleshooting_page() -> None:
     result = runner.invoke(app, ["docs", "troubleshooting"])
 

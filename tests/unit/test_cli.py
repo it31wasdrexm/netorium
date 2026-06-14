@@ -15,6 +15,14 @@ def test_help_shows_main_commands() -> None:
     assert "Netorium CLI for building-level network access control." in result.output
     assert "config" in result.output
     assert "docs" in result.output
+    assert "update" in result.output
+    assert "zone" in result.output
+    assert "device" in result.output
+    assert "firewall" in result.output
+    assert "prtg" in result.output
+    assert "ad" in result.output
+    assert "telegram" in result.output
+    assert "audit" in result.output
     assert "version" in result.output
     assert "doctor" in result.output
 

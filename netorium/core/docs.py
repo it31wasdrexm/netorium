@@ -9,6 +9,7 @@ DOC_PAGES: Final[dict[str, str]] = {
     "index": "index.md",
     "commands": "commands.md",
     "examples": "examples.md",
+    "install": "install.md",
     "troubleshooting": "troubleshooting.md",
 }
 

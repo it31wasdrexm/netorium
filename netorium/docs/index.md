@@ -19,4 +19,5 @@ netorium config validate
 
 - `netorium docs commands`
 - `netorium docs examples`
+- `netorium docs install`
 - `netorium docs troubleshooting`

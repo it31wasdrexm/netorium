@@ -2,18 +2,22 @@
 
 ## GitHub Install
 
-Replace `OWNER/REPO` with the GitHub repository path.
+Linux / macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh \
-  | NETORIUM_GITHUB_REPO=OWNER/REPO bash
+curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh | bash
+```
+
+To install from another fork or repository:
+
+```bash
+curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh | NETORIUM_GITHUB_REPO=OWNER/REPO bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:NETORIUM_GITHUB_REPO = "OWNER/REPO"
-irm https://raw.githubusercontent.com/OWNER/REPO/main/install.ps1 | iex
+irm https://github.com/it31wasdrexm/netorium/raw/main/install.ps1 | iex
 ```
 
 ## PyPI Install
@@ -21,7 +25,11 @@ irm https://raw.githubusercontent.com/OWNER/REPO/main/install.ps1 | iex
 After the package is published to PyPI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh \
+curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh | NETORIUM_INSTALL_SOURCE=pypi bash
+```
+
+```bash
+curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh \
   | NETORIUM_INSTALL_SOURCE=pypi bash
 ```
 
@@ -33,6 +41,12 @@ From the repository root:
 python -m pip install -e .
 netorium --help
 ```
+
+## Linux / macOS Installer Behavior
+
+The installer uses `pipx` when it is available. If `pipx` is not installed, it
+creates a dedicated virtual environment at `~/.local/share/netorium/venv`,
+installs Netorium there, and links `netorium` into `~/.local/bin`.
 
 ## Verify
 

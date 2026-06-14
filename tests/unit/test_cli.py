@@ -14,6 +14,7 @@ def test_help_shows_main_commands() -> None:
     assert result.exit_code == 0
     assert "Netorium CLI for building-level network access control." in result.output
     assert "config" in result.output
+    assert "docs" in result.output
     assert "version" in result.output
     assert "doctor" in result.output
 

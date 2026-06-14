@@ -1,0 +1,48 @@
+import pytest
+from typer.testing import CliRunner
+
+from netorium.cli.app import app
+from netorium.core import docs as docs_core
+
+runner = CliRunner()
+
+
+def test_docs_shows_index_page() -> None:
+    result = runner.invoke(app, ["docs"])
+
+    assert result.exit_code == 0
+    assert "Netorium CLI" in result.output
+    assert "Documentation Pages" in result.output
+
+
+def test_docs_commands_page() -> None:
+    result = runner.invoke(app, ["docs", "commands"])
+
+    assert result.exit_code == 0
+    assert "Commands" in result.output
+    assert "Configuration" in result.output
+
+
+def test_docs_examples_page() -> None:
+    result = runner.invoke(app, ["docs", "examples"])
+
+    assert result.exit_code == 0
+    assert "Examples" in result.output
+    assert "config validate" in result.output
+
+
+def test_docs_troubleshooting_page() -> None:
+    result = runner.invoke(app, ["docs", "troubleshooting"])
+
+    assert result.exit_code == 0
+    assert "Troubleshooting" in result.output
+    assert "Config File Not Found" in result.output
+
+
+def test_docs_missing_page_fails_gracefully(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(docs_core.DOC_PAGES, "index", "missing.md")
+
+    result = runner.invoke(app, ["docs"])
+
+    assert result.exit_code == 1
+    assert "Documentation page is missing" in result.output

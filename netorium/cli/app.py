@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 
 from netorium.cli.commands.config import config_app
+from netorium.cli.commands.docs import docs_app
 from netorium.core.metadata import APP_NAME, get_version
 
 console = Console()
@@ -16,6 +17,7 @@ app = typer.Typer(
 )
 
 app.add_typer(config_app, name="config")
+app.add_typer(docs_app, name="docs")
 
 
 @app.command()

@@ -12,6 +12,7 @@ from netorium.services.update_checker import (
     UpdateConfig,
     UpdateInfo,
     build_download_instructions,
+    build_platform_install_instructions,
     build_update_config,
     check_for_update,
 )
@@ -35,9 +36,13 @@ def check() -> None:
         raise typer.Exit(1) from exc
 
     if info.is_update_available:
+        platform_instructions = build_platform_install_instructions(_download_instructions())
         console.print(f"Update available: {info.latest_version}")
         console.print(f"Current version: {info.current_version}")
-        console.print(f"Run: {info.install_command}")
+        console.print(f"Platform: {platform_instructions.platform_name}")
+        console.print(f"Run: {platform_instructions.install_command}")
+        console.print(f"Standalone: {platform_instructions.standalone_command}")
+        console.print(f"Package manager: {info.install_command}")
         console.print(f"Release: {info.release_url}")
         return
 
@@ -56,8 +61,17 @@ def show() -> None:
     table.add_row("Latest version", info.latest_version if info else "unknown")
     table.add_row("Source", info.source if info else "github")
     table.add_row("Release", info.release_url if info else _download_instructions().release_url)
+    platform_instructions = build_platform_install_instructions(_download_instructions())
     table.add_row(
-        "Recommended command",
+        f"Recommended for {platform_instructions.platform_name}",
+        platform_instructions.install_command,
+    )
+    table.add_row(
+        "Standalone for this OS",
+        platform_instructions.standalone_command,
+    )
+    table.add_row(
+        "Package manager command",
         info.install_command if info else f"pipx install --force {DEFAULT_PACKAGE_NAME}",
     )
     table.add_row("pip command", f"python -m pip install --upgrade {DEFAULT_PACKAGE_NAME}")
@@ -79,6 +93,9 @@ def install() -> None:
         console.print(f"Release: {info.release_url}")
 
     console.print("Run one of these commands manually:")
+    platform_instructions = build_platform_install_instructions(_download_instructions())
+    console.print(f"  {platform_instructions.install_command}")
+    console.print(f"  {platform_instructions.standalone_command}")
     if info is not None:
         console.print(f"  {info.install_command}")
     console.print(f"  python -m pip install --upgrade {DEFAULT_PACKAGE_NAME}")
@@ -142,6 +159,12 @@ def _render_download_instructions(instructions: DownloadInstructions) -> None:
     table.add_row("PyPI/pipx", instructions.pypi_install)
     table.add_row("Docker run", instructions.docker_run)
     table.add_row("Docker local build", instructions.docker_build)
+    platform_instructions = build_platform_install_instructions(instructions)
+    table.add_row(
+        f"Recommended for {platform_instructions.platform_name}",
+        platform_instructions.install_command,
+    )
+    table.add_row("Standalone for this OS", platform_instructions.standalone_command)
     table.add_row("Standalone Windows", instructions.standalone_assets[0])
     table.add_row("Standalone Linux", instructions.standalone_assets[1])
     table.add_row(
@@ -153,4 +176,10 @@ def _render_download_instructions(instructions: DownloadInstructions) -> None:
     console.print(f"  Release: {instructions.release_url}", soft_wrap=True)
     console.print(f"  Linux/macOS: {instructions.linux_macos_installer}", soft_wrap=True)
     console.print(f"  Windows PowerShell: {instructions.windows_installer}", soft_wrap=True)
+    console.print(
+        f"  Recommended for {platform_instructions.platform_name}: "
+        f"{platform_instructions.install_command}",
+        soft_wrap=True,
+    )
+    console.print(f"  Standalone for this OS: {platform_instructions.standalone_command}", soft_wrap=True)
     console.print(f"  Docker: {instructions.docker_run}", soft_wrap=True)

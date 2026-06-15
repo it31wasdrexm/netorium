@@ -36,4 +36,3 @@ site/
 *.swo
 .DS_Store
 Thumbs.db
-RELEASE_BUILD.md

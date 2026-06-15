@@ -9,6 +9,7 @@ from netorium.services.update_checker import (
     UpdateCheckError,
     UpdateConfig,
     build_download_instructions,
+    build_platform_install_instructions,
     build_update_config,
     check_for_update,
     compare_versions,
@@ -110,6 +111,34 @@ def test_download_instructions_include_release_assets_and_docker() -> None:
     assert "install.ps1" in instructions.windows_installer
     assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" == instructions.docker_run
     assert "netorium-windows-x64.exe" in instructions.standalone_assets
+
+
+def test_platform_install_instructions_select_linux_commands() -> None:
+    instructions = build_download_instructions(repo=PLACEHOLDER_REPO)
+
+    platform_instructions = build_platform_install_instructions(
+        instructions,
+        system_name="Linux",
+    )
+
+    assert platform_instructions.platform_name == "Linux"
+    assert platform_instructions.install_command == instructions.linux_macos_installer
+    assert "netorium-linux-x64" in platform_instructions.standalone_command
+    assert platform_instructions.standalone_asset == "netorium-linux-x64"
+
+
+def test_platform_install_instructions_select_windows_commands() -> None:
+    instructions = build_download_instructions(repo=PLACEHOLDER_REPO)
+
+    platform_instructions = build_platform_install_instructions(
+        instructions,
+        system_name="Windows",
+    )
+
+    assert platform_instructions.platform_name == "Windows"
+    assert platform_instructions.install_command == instructions.windows_installer
+    assert "Invoke-WebRequest" in platform_instructions.standalone_command
+    assert "netorium-windows-x64.exe" in platform_instructions.standalone_command
 
 
 def test_update_check_handles_network_failure() -> None:

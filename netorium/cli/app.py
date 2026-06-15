@@ -1,8 +1,10 @@
+import platform
 import shlex
 from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 from typer.main import get_command
 
@@ -17,6 +19,8 @@ from netorium.cli.commands.telegram import telegram_app
 from netorium.cli.commands.update import update_app
 from netorium.cli.commands.zone import zone_app
 from netorium.core.metadata import APP_NAME, get_version
+from netorium.core.settings import default_config_path
+from netorium.services.update_notifications import StartupUpdateNotice, get_startup_update_notice
 from netorium.services.uninstaller import (
     UninstallError,
     UninstallPlan,
@@ -93,8 +97,8 @@ def _run_interactive_command(args: list[str]) -> None:
 
 
 def _run_interactive_shell() -> None:
-    console.print("Netorium interactive mode. Type commands without the netorium prefix.")
-    console.print("Type help to list commands, or exit to leave.")
+    _render_interactive_header()
+    _render_startup_update_notice()
 
     while True:
         try:
@@ -112,6 +116,39 @@ def _run_interactive_shell() -> None:
         _run_interactive_command(args)
 
     console.print("Leaving Netorium.")
+
+
+def _render_interactive_header() -> None:
+    console.print(
+        Panel.fit(
+            f"[bold]{APP_NAME} {get_version()}[/]\n"
+            "Netorium interactive mode. Type commands without the netorium prefix.\n"
+            "[dim]Try: version, doctor, config path, update show, help, exit[/]",
+            title="netorium",
+            border_style="cyan",
+        )
+    )
+
+
+def _render_startup_update_notice() -> None:
+    notice = get_startup_update_notice()
+    if notice is None:
+        return
+
+    console.print(_startup_update_panel(notice))
+
+
+def _startup_update_panel(notice: StartupUpdateNotice) -> Panel:
+    platform = notice.platform
+    body = (
+        f"[bold yellow]Update available:[/] {notice.info.latest_version}\n"
+        f"Current version: {notice.info.current_version}\n"
+        f"Platform: {platform.platform_name}\n"
+        f"Run: [bold]{platform.install_command}[/]\n"
+        f"Standalone: {platform.standalone_command}\n"
+        f"Release: {notice.info.release_url}"
+    )
+    return Panel.fit(body, title="Netorium Update", border_style="yellow")
 
 
 @app.callback(invoke_without_command=True)
@@ -135,9 +172,18 @@ def doctor(
     ] = False,
 ) -> None:
     """Run basic local environment checks."""
-    console.print(f"{APP_NAME} basic checks: OK")
+    config_path = default_config_path()
+    table = Table(title="Netorium Doctor")
+    table.add_column("Check")
+    table.add_column("Result")
+    table.add_row("CLI", "OK")
+    table.add_row("Version", get_version())
+    table.add_row("Platform", platform.system() or "unknown")
+    table.add_row("Config path", str(config_path))
+    table.add_row("Config file", "found" if config_path.exists() else "missing")
+    console.print(table)
     if verbose:
-        console.print("Detailed checks will be added in later MVP tasks.")
+        console.print("Run `netorium config validate` to validate the active configuration.")
 
 
 @app.command("unistall", hidden=True)

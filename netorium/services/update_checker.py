@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import platform
 from typing import Any, Literal, Protocol, cast
 
 import requests
@@ -62,6 +63,14 @@ class DownloadInstructions:
     docker_run: str
     docker_build: str
     standalone_assets: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PlatformInstallInstructions:
+    platform_name: str
+    install_command: str
+    standalone_command: str
+    standalone_asset: str | None
 
 
 def check_for_update(
@@ -136,6 +145,63 @@ def build_download_instructions(
             "netorium-macos-x64",
             "netorium-macos-arm64",
         ),
+    )
+
+
+def build_platform_install_instructions(
+    instructions: DownloadInstructions,
+    system_name: str | None = None,
+    machine: str | None = None,
+) -> PlatformInstallInstructions:
+    normalized_system = (system_name or platform.system()).lower()
+    normalized_machine = (machine or platform.machine()).lower()
+
+    if normalized_system.startswith("win"):
+        asset = instructions.standalone_assets[0]
+        return PlatformInstallInstructions(
+            platform_name="Windows",
+            install_command=instructions.windows_installer,
+            standalone_command=(
+                "Invoke-WebRequest -Uri "
+                f"{_release_asset_url(instructions.release_url, asset)} "
+                f"-OutFile .\\{asset}; .\\{asset} version"
+            ),
+            standalone_asset=asset,
+        )
+
+    if normalized_system == "linux":
+        asset = instructions.standalone_assets[1]
+        return PlatformInstallInstructions(
+            platform_name="Linux",
+            install_command=instructions.linux_macos_installer,
+            standalone_command=(
+                "mkdir -p ~/.local/bin && "
+                "curl -fL -o ~/.local/bin/netorium "
+                f"{_release_asset_url(instructions.release_url, asset)} && "
+                "chmod +x ~/.local/bin/netorium && netorium version"
+            ),
+            standalone_asset=asset,
+        )
+
+    if normalized_system == "darwin":
+        asset = instructions.standalone_assets[3] if "arm" in normalized_machine else instructions.standalone_assets[2]
+        return PlatformInstallInstructions(
+            platform_name="macOS",
+            install_command=instructions.linux_macos_installer,
+            standalone_command=(
+                "mkdir -p ~/.local/bin && "
+                "curl -fL -o ~/.local/bin/netorium "
+                f"{_release_asset_url(instructions.release_url, asset)} && "
+                "chmod +x ~/.local/bin/netorium && netorium version"
+            ),
+            standalone_asset=asset,
+        )
+
+    return PlatformInstallInstructions(
+        platform_name="this OS",
+        install_command=instructions.pypi_install,
+        standalone_command=f"Open {instructions.release_url} and download the matching asset.",
+        standalone_asset=None,
     )
 
 
@@ -215,6 +281,10 @@ def _read_optional_string(payload: dict[str, Any], key: str) -> str | None:
     if isinstance(value, str) and value.strip():
         return value
     return None
+
+
+def _release_asset_url(release_url: str, asset: str) -> str:
+    return f"{release_url.rstrip('/')}/download/{asset}"
 
 
 def _strip_version_prefix(version: str) -> str:

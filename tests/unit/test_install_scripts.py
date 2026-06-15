@@ -104,15 +104,8 @@ def test_dockerfile_installs_and_runs_cli() -> None:
     assert 'ENTRYPOINT ["netorium"]' in text
 
 
-def test_release_workflow_builds_standalone_assets() -> None:
-    text = (PROJECT_ROOT / ".github" / "workflows" / "release.yml").read_text(
-        encoding="utf-8"
-    )
-
-    assert "netorium-windows-x64.exe" in text
-    assert "netorium-linux-x64" in text
-    assert "pyinstaller --noconfirm --clean packaging/netorium.spec" in text
-    assert "ghcr.io/${{ github.repository }}" in text
+def test_github_actions_release_workflow_was_removed() -> None:
+    assert (PROJECT_ROOT / ".github" / "workflows" / "release.yml").exists() is False
 
 
 def test_pyinstaller_spec_uses_paths_relative_to_spec_file() -> None:

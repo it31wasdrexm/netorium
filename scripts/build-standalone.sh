@@ -69,7 +69,7 @@ case "$(uname -s)" in
     ;;
   *)
     echo "Unsupported native build host: $(uname -s)." >&2
-    echo "Use GitHub Actions or a matching OS machine." >&2
+    echo "Use a matching OS machine, VM, or CI runner." >&2
     echo "For Windows, run scripts/build-windows.ps1 on Windows PowerShell." >&2
     exit 1
     ;;

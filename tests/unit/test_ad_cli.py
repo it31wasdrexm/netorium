@@ -7,6 +7,7 @@ from netorium.cli.app import app
 from netorium.cli.commands import ad as ad_command
 from netorium.core.settings import CONFIG_TEMPLATE
 from netorium.services.ad_client import ActiveDirectoryError, ActiveDirectoryTestResult
+from tests.unit.path_helpers import isolated_config_dir, isolated_user_env
 
 runner = CliRunner()
 
@@ -38,12 +39,11 @@ def test_ad_test_renders_success_without_exposing_password(
 
 
 def test_ad_test_reports_placeholder_config(tmp_path: Path) -> None:
-    config_home = tmp_path / "config"
-    config_dir = config_home / "netorium"
+    config_dir = isolated_config_dir(tmp_path)
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(CONFIG_TEMPLATE, encoding="utf-8")
 
-    result = runner.invoke(app, ["ad", "test"], env={"XDG_CONFIG_HOME": str(config_home)})
+    result = runner.invoke(app, ["ad", "test"], env=isolated_user_env(tmp_path))
 
     assert result.exit_code == 1
     assert "AD settings are not configured" in result.output
@@ -68,9 +68,8 @@ def test_ad_test_reports_service_error(
 
 
 def _write_config(tmp_path: Path) -> dict[str, str]:
-    config_home = tmp_path / "config"
     database_path = tmp_path / "state" / "netorium.db"
-    config_dir = config_home / "netorium"
+    config_dir = isolated_config_dir(tmp_path)
     config_dir.mkdir(parents=True)
     config_text = CONFIG_TEMPLATE.replace(
         'database_path = "~/.local/share/netorium/netorium.db"',
@@ -90,4 +89,4 @@ def _write_config(tmp_path: Path) -> dict[str, str]:
         'bind_password = "secret-password"',
     )
     (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
-    return {"XDG_CONFIG_HOME": str(config_home)}
+    return isolated_user_env(tmp_path)

@@ -11,6 +11,12 @@ from netorium.core.metadata import APP_NAME, get_version
 from netorium.core.settings import CONFIG_TEMPLATE
 from netorium.services.update_checker import PlatformInstallInstructions, UpdateInfo
 from netorium.services.update_notifications import StartupUpdateNotice
+from tests.unit.path_helpers import (
+    isolated_cache_dir,
+    isolated_config_dir,
+    isolated_data_dir,
+    isolated_user_env,
+)
 
 runner = CliRunner()
 
@@ -124,7 +130,7 @@ def test_uninstall_dry_run_shows_plan(tmp_path: Path) -> None:
     assert "Netorium Uninstall" in result.output
     assert "Dry run only" in result.output
     assert "netorium-cli" in result.output
-    assert (tmp_path / "config" / "netorium").exists() is True
+    assert isolated_config_dir(tmp_path).exists() is True
 
 
 def test_uninstall_remove_data_with_yes(tmp_path: Path) -> None:
@@ -138,9 +144,9 @@ def test_uninstall_remove_data_with_yes(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Netorium uninstall completed." in result.output
-    assert (tmp_path / "config" / "netorium").exists() is False
-    assert (tmp_path / "data" / "netorium").exists() is False
-    assert (tmp_path / "cache" / "netorium").exists() is False
+    assert isolated_config_dir(tmp_path).exists() is False
+    assert isolated_data_dir(tmp_path).exists() is False
+    assert isolated_cache_dir(tmp_path).exists() is False
 
 
 def test_unistall_typo_alias_works(tmp_path: Path) -> None:
@@ -165,9 +171,9 @@ def test_python_module_help() -> None:
 
 
 def _write_uninstall_config(tmp_path: Path) -> dict[str, str]:
-    config_dir = tmp_path / "config" / "netorium"
-    data_dir = tmp_path / "data" / "netorium"
-    cache_dir = tmp_path / "cache" / "netorium"
+    config_dir = isolated_config_dir(tmp_path)
+    data_dir = isolated_data_dir(tmp_path)
+    cache_dir = isolated_cache_dir(tmp_path)
     config_dir.mkdir(parents=True)
     data_dir.mkdir(parents=True)
     cache_dir.mkdir(parents=True)
@@ -179,8 +185,4 @@ def _write_uninstall_config(tmp_path: Path) -> dict[str, str]:
     (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
     database_path.write_text("database", encoding="utf-8")
     (cache_dir / "cache.txt").write_text("cache", encoding="utf-8")
-    return {
-        "XDG_CONFIG_HOME": str(tmp_path / "config"),
-        "XDG_DATA_HOME": str(tmp_path / "data"),
-        "XDG_CACHE_HOME": str(tmp_path / "cache"),
-    }
+    return isolated_user_env(tmp_path)

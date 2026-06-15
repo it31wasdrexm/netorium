@@ -1,15 +1,5 @@
-AGENTS.md
-CODEX_TASKS.md
-README_CODEX.md
-README_STARTER.md
-TECH_SPEC_EN.md
-TECH_SPEC_RU.md
+www/
 pyproject_example.toml
-DEPLOYMENT_EN.md
-DEPLOYMENT_RU.md
-PROMPT_FOR_CODEX.md
-CODEX_WORKLOG.md
-INSTALL.md
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,6 +10,9 @@ __pycache__/
 htmlcov/
 .venv/
 .venv-release/
+.venv-release-win/
+.venv-win/
+.netorium-release-tmp/
 venv/
 env/
 .env

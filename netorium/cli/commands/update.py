@@ -42,6 +42,8 @@ def check() -> None:
         console.print(f"Platform: {platform_instructions.platform_name}")
         console.print(f"Run: {platform_instructions.install_command}")
         console.print(f"Standalone: {platform_instructions.standalone_command}")
+        if platform_instructions.standalone_asset is not None:
+            console.print(f"Standalone asset: {platform_instructions.standalone_asset}")
         console.print(f"Package manager: {info.install_command}")
         console.print(f"Release: {info.release_url}")
         return

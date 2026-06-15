@@ -49,6 +49,9 @@ def test_install_docs_include_download_commands() -> None:
     assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" in text
     assert "scripts/build-standalone.sh" in text
     assert ".\\scripts\\build-windows.ps1" in text
+    assert "-ExecutionPolicy Bypass" in text
+    assert ".venv-win" in text
+    assert ".venv-release-win" in text
     assert "Build the Windows standalone executable on Windows" in text
     assert "scripts/build-windows-on-linux.sh" not in text
 
@@ -61,6 +64,8 @@ def test_local_release_helpers_use_native_asset_names() -> None:
     assert "python3.11 -m venv" not in native
     assert "NETORIUM_PYTHON" in native
     assert "NETORIUM_RELEASE_VENV" in native
+    assert "NETORIUM_RELEASE_TEMP_DIR" in native
+    assert "PYINSTALLER_CONFIG_DIR" in native
     assert "-m PyInstaller --noconfirm --clean packaging/netorium.spec" in native
     assert "python -m pip install --upgrade pip" not in native
     assert "asset_name=\"netorium-linux-$(asset_arch)\"" in native
@@ -68,31 +73,43 @@ def test_local_release_helpers_use_native_asset_names() -> None:
 
     assert "NETORIUM_PYTHON" in windows
     assert "Python 3.11+ was not found" in windows
+    assert ".venv-release-win" in windows
+    assert ".netorium-release-tmp" in windows
+    assert "$env:TEMP" in windows
+    assert "$env:PIP_CACHE_DIR" in windows
+    assert "$env:PYINSTALLER_CONFIG_DIR" in windows
     assert 'Join-Path "dist" "netorium.exe"' in windows
     assert "netorium-windows-$(Get-AssetArch).exe" in windows
     assert "NETORIUM_WINE_PYTHON" not in windows
+    assert "build-windows.cmd" not in windows
 
 
-def test_release_build_guide_documents_native_linux_and_windows() -> None:
-    text = (PROJECT_ROOT / "RELEASE_BUILD.md").read_text(encoding="utf-8")
+def test_install_docs_document_native_linux_and_windows_release_assets() -> None:
+    text = (PROJECT_ROOT / "netorium" / "docs" / "install.md").read_text(encoding="utf-8")
 
-    assert "Do not upload files directly from `dist/`" in text
     assert "scripts/build-standalone.sh" in text
     assert ".\\scripts\\build-windows.ps1" in text
-    assert "release-assets/netorium-linux-x64" in text
-    assert "release-assets\\netorium-windows-x64.exe" in text
-    assert "gh release upload VERSION release-assets/netorium-linux-x64 --clobber" in text
-    assert (
-        "gh release upload VERSION release-assets\\netorium-windows-x64.exe --clobber"
-        in text
-    )
-    assert "gh release delete-asset VERSION netorium -y" in text
+    assert ".\\scripts\\build-windows.cmd" not in text
+    assert "-ExecutionPolicy Bypass" in text
+    assert ".venv-release-win" in text
+    assert ".netorium-release-tmp" in text
+    assert "release-assets/netorium-windows-x64.exe" in text
+    assert "Build the Windows standalone executable on Windows" in text
+    assert "scripts/build-windows-on-linux.sh" not in text
 
 
 def test_gitignore_excludes_local_release_outputs() -> None:
     text = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
 
+    assert "www/" in text
+    assert "README_CODEX.md" not in text
+    assert "TECH_SPEC_EN.md" not in text
+    assert "TECH_SPEC_RU.md" not in text
+    assert "RELEASE_BUILD.md" not in text
+    assert "INSTALL.md" not in text
     assert ".venv-release/" in text
+    assert ".venv-release-win/" in text
+    assert ".venv-win/" in text
     assert "release-assets/" in text
 
 
@@ -102,6 +119,12 @@ def test_dockerfile_installs_and_runs_cli() -> None:
     assert "FROM python:3.11-slim" in text
     assert "python -m pip install --no-cache-dir ." in text
     assert 'ENTRYPOINT ["netorium"]' in text
+
+
+def test_dockerignore_excludes_local_agent_docs() -> None:
+    text = (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8")
+
+    assert "www/" in text
 
 
 def test_github_actions_release_workflow_was_removed() -> None:

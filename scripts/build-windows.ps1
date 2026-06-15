@@ -3,8 +3,18 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $ProjectRoot
 
-$VenvDir = if ($env:NETORIUM_RELEASE_VENV) { $env:NETORIUM_RELEASE_VENV } else { ".venv-release" }
+$VenvDir = if ($env:NETORIUM_RELEASE_VENV) { $env:NETORIUM_RELEASE_VENV } else { ".venv-release-win" }
 $AssetDir = if ($env:NETORIUM_RELEASE_ASSET_DIR) { $env:NETORIUM_RELEASE_ASSET_DIR } else { "release-assets" }
+$BuildTempDir = if ($env:NETORIUM_RELEASE_TEMP_DIR) { $env:NETORIUM_RELEASE_TEMP_DIR } else { ".netorium-release-tmp" }
+
+New-Item -ItemType Directory -Force -Path $BuildTempDir | Out-Null
+$ResolvedBuildTempDir = (Resolve-Path $BuildTempDir).Path
+$env:TEMP = $ResolvedBuildTempDir
+$env:TMP = $ResolvedBuildTempDir
+$env:PIP_CACHE_DIR = Join-Path $ResolvedBuildTempDir "pip-cache"
+$env:PYINSTALLER_CONFIG_DIR = Join-Path $ResolvedBuildTempDir "pyinstaller-cache"
+New-Item -ItemType Directory -Force -Path $env:PIP_CACHE_DIR | Out-Null
+New-Item -ItemType Directory -Force -Path $env:PYINSTALLER_CONFIG_DIR | Out-Null
 
 function Get-AssetArch {
     switch ($env:PROCESSOR_ARCHITECTURE) {
@@ -66,18 +76,38 @@ function Invoke-ReleasePython {
     $Command = $Python["Command"]
     $BaseArguments = [string[]] $Python["Arguments"]
     & $Command @($BaseArguments + $Arguments)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed with exit code $LASTEXITCODE: $Command $(($BaseArguments + $Arguments) -join ' ')"
+    }
+}
+
+function Invoke-NativeCommand {
+    param(
+        [string] $Command,
+        [string[]] $Arguments
+    )
+
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed with exit code $LASTEXITCODE: $Command $($Arguments -join ' ')"
+    }
 }
 
 $Python = Get-PythonCommand
 Write-Host "Using Python:"
 Invoke-ReleasePython -Python $Python -Arguments @("-c", "import sys; print(sys.executable + ' ' + sys.version.split()[0])")
 
-Invoke-ReleasePython -Python $Python -Arguments @("-m", "venv", $VenvDir)
-
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
-& $VenvPython -m pip install --upgrade pip
-& $VenvPython -m pip install -e ".[release]"
-& $VenvPython -m PyInstaller --noconfirm --clean packaging/netorium.spec
+if (-not (Test-Path $VenvPython)) {
+    Invoke-ReleasePython -Python $Python -Arguments @("-m", "venv", $VenvDir)
+} else {
+    Write-Host "Using release venv: $VenvDir"
+    Invoke-NativeCommand -Command $VenvPython -Arguments @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)")
+}
+
+Invoke-NativeCommand -Command $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip")
+Invoke-NativeCommand -Command $VenvPython -Arguments @("-m", "pip", "install", "-e", ".[release]")
+Invoke-NativeCommand -Command $VenvPython -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "packaging/netorium.spec")
 
 $SourcePath = Join-Path "dist" "netorium.exe"
 if (-not (Test-Path $SourcePath)) {

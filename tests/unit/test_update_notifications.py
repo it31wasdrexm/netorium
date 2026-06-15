@@ -5,6 +5,7 @@ import pytest
 
 from netorium.core.settings import CONFIG_TEMPLATE
 from netorium.services.update_notifications import get_startup_update_notice
+from tests.unit.path_helpers import isolated_config_dir, isolated_user_env
 
 
 class FakeResponse:
@@ -28,7 +29,8 @@ class FakeClient:
 
 
 def test_startup_notice_skips_missing_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for key, value in isolated_user_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
     client = FakeClient()
 
     notice = get_startup_update_notice(
@@ -45,13 +47,14 @@ def test_startup_notice_skips_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config_dir = tmp_path / "config" / "netorium"
+    config_dir = isolated_config_dir(tmp_path)
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         CONFIG_TEMPLATE.replace("check_on_start = true", "check_on_start = false"),
         encoding="utf-8",
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for key, value in isolated_user_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
     client = FakeClient()
 
     notice = get_startup_update_notice(
@@ -68,10 +71,11 @@ def test_startup_notice_returns_platform_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config_dir = tmp_path / "config" / "netorium"
+    config_dir = isolated_config_dir(tmp_path)
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(CONFIG_TEMPLATE, encoding="utf-8")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for key, value in isolated_user_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
     client = FakeClient()
 
     notice = get_startup_update_notice(

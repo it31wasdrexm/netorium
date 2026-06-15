@@ -36,7 +36,7 @@ def test_user_config_path_uses_windows_appdata() -> None:
         env={"APPDATA": "C:/Users/Admin/AppData/Roaming"},
     )
 
-    assert str(path) == "C:/Users/Admin/AppData/Roaming/Netorium/config.toml"
+    assert path == Path("C:/Users/Admin/AppData/Roaming/Netorium/config.toml")
 
 
 def test_user_data_dir_uses_xdg_data_home() -> None:

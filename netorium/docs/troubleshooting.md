@@ -75,11 +75,43 @@ Build the Windows executable on Windows:
 .\scripts\build-windows.ps1
 ```
 
+If Windows PowerShell prints that running scripts is disabled on this system,
+use a process-local bypass:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
+```
+
+The helper uses `.venv-release-win` by default so it does not mix files with a
+Linux `.venv-release`. To override the release environment or temp directory:
+
+```powershell
+$env:NETORIUM_RELEASE_VENV = ".venv-release-custom"
+$env:NETORIUM_RELEASE_TEMP_DIR = ".netorium-release-tmp"
+.\scripts\build-windows.ps1
+```
+
 The expected release asset is:
 
 ```text
 release-assets/netorium-windows-x64.exe
 ```
+
+## Netorium Command Not Recognized on Windows
+
+A source checkout does not create a global `netorium` command by itself. If
+`netorium` is not recognized, install it or run it through a Windows venv from
+the repository root:
+
+```powershell
+py -3 -m venv .venv-win
+.\.venv-win\Scripts\python.exe -m pip install --upgrade pip
+.\.venv-win\Scripts\python.exe -m pip install -e .
+.\.venv-win\Scripts\netorium.exe --help
+```
+
+Do not reuse a `.venv` copied from Linux on Windows. Linux virtual environments
+have `bin/` launchers, while Windows needs `Scripts\*.exe` launchers.
 
 If a GitHub Release asset is named only `netorium`, it was uploaded from
 `dist/netorium` directly. Upload the renamed file from `release-assets/`

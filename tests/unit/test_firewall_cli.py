@@ -4,6 +4,7 @@ from typer.testing import CliRunner
 
 from netorium.cli.app import app
 from netorium.core.settings import CONFIG_TEMPLATE
+from tests.unit.path_helpers import isolated_config_dir, isolated_user_env
 
 runner = CliRunner()
 
@@ -93,13 +94,12 @@ def test_firewall_real_mode_fails_safely_on_non_windows(tmp_path: Path) -> None:
 
 
 def _write_config(tmp_path: Path) -> dict[str, str]:
-    config_home = tmp_path / "config"
     database_path = tmp_path / "state" / "netorium.db"
-    config_dir = config_home / "netorium"
+    config_dir = isolated_config_dir(tmp_path)
     config_dir.mkdir(parents=True)
     config_text = CONFIG_TEMPLATE.replace(
         'database_path = "~/.local/share/netorium/netorium.db"',
         f'database_path = "{database_path.as_posix()}"',
     )
     (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
-    return {"XDG_CONFIG_HOME": str(config_home)}
+    return isolated_user_env(tmp_path)

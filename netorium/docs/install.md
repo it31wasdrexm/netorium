@@ -67,6 +67,22 @@ In Windows PowerShell from the repository root:
 .\scripts\build-windows.ps1
 ```
 
+If PowerShell blocks local scripts with an execution policy error, run either:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
+```
+
+The helper uses `.venv-release-win` by default so a checkout that already has a
+Linux `.venv-release` does not mix Linux and Windows virtual environment files.
+To override the release environment or temp directory:
+
+```powershell
+$env:NETORIUM_RELEASE_VENV = ".venv-release-custom"
+$env:NETORIUM_RELEASE_TEMP_DIR = ".netorium-release-tmp"
+.\scripts\build-windows.ps1
+```
+
 The helper copies the result to:
 
 ```text
@@ -159,6 +175,20 @@ From the repository root:
 python -m pip install -e .
 netorium --help
 ```
+
+On Windows, create a Windows virtual environment first if `netorium` is not
+recognized or the cloned Linux `.venv` is present:
+
+```powershell
+cd C:\Users\roman\desktop\netorium
+py -3 -m venv .venv-win
+.\.venv-win\Scripts\python.exe -m pip install --upgrade pip
+.\.venv-win\Scripts\python.exe -m pip install -e .
+.\.venv-win\Scripts\netorium.exe --help
+```
+
+To make `netorium` available from any new terminal, install through the Windows
+installer or add the chosen Scripts/bin directory to `PATH`.
 
 ## Verify
 

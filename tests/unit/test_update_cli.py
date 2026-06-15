@@ -3,15 +3,23 @@ from typer.testing import CliRunner
 
 from netorium.cli.app import app
 from netorium.cli.commands import update as update_command
-from netorium.services.update_checker import UpdateCheckError, UpdateInfo, UpdateConfig
+from netorium.services.update_checker import (
+    DownloadInstructions,
+    PlatformInstallInstructions,
+    UpdateCheckError,
+    UpdateConfig,
+    UpdateInfo,
+    build_platform_install_instructions,
+)
 
 runner = CliRunner()
 
 
 def test_update_check_shows_available_release(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_command, "_run_update_check", _new_release)
+    monkeypatch.setattr(update_command, "build_platform_install_instructions", _linux_platform)
 
-    result = runner.invoke(app, ["update", "check"])
+    result = runner.invoke(app, ["update", "check"], terminal_width=160)
 
     assert result.exit_code == 0
     assert "Update available: 0.2.0" in result.output
@@ -35,6 +43,7 @@ def test_update_check_shows_up_to_date(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_update_show_renders_details(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_command, "_run_update_check", _new_release)
+    monkeypatch.setattr(update_command, "build_platform_install_instructions", _linux_platform)
 
     result = runner.invoke(app, ["update", "show"])
 
@@ -116,4 +125,12 @@ def _current_release() -> UpdateInfo:
         release_url="https://github.com/example/netorium/releases/tag/v0.1.0",
         source="github",
         install_command="pipx upgrade netorium-cli",
+    )
+
+
+def _linux_platform(instructions: DownloadInstructions) -> PlatformInstallInstructions:
+    return build_platform_install_instructions(
+        instructions,
+        system_name="Linux",
+        machine="x86_64",
     )

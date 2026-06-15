@@ -34,6 +34,9 @@ release = [
 [project.scripts]
 netorium = "netorium.cli.app:app"
 
+[tool.setuptools.packages.find]
+include = ["netorium*"]
+
 [tool.setuptools.package-data]
 netorium = ["docs/*.md"]
 

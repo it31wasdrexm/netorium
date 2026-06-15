@@ -1,14 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
+spec_dir = Path(SPECPATH)
+project_root = spec_dir.parent
 datas = collect_data_files("netorium", includes=["docs/*.md"])
 hiddenimports = collect_submodules("ldap3")
 
 a = Analysis(
-    ["packaging/standalone_entry.py"],
-    pathex=[],
+    [str(spec_dir / "standalone_entry.py")],
+    pathex=[str(project_root)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

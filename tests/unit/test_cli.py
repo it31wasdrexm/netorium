@@ -5,6 +5,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from netorium.cli.app import app
+from netorium.core.metadata import APP_NAME, get_version
 from netorium.core.settings import CONFIG_TEMPLATE
 
 runner = CliRunner()
@@ -35,7 +36,7 @@ def test_version_command() -> None:
     result = runner.invoke(app, ["version"])
 
     assert result.exit_code == 0
-    assert "Netorium CLI 0.1.0" in result.output
+    assert f"{APP_NAME} {get_version()}" in result.output
 
 
 def test_interactive_shell_runs_commands_without_prefix() -> None:
@@ -44,7 +45,7 @@ def test_interactive_shell_runs_commands_without_prefix() -> None:
     assert result.exit_code == 0
     assert "Netorium interactive mode." in result.output
     assert "netorium>" in result.output
-    assert "Netorium CLI 0.1.0" in result.output
+    assert f"{APP_NAME} {get_version()}" in result.output
     assert "Leaving Netorium." in result.output
 
 
@@ -52,7 +53,7 @@ def test_interactive_shell_accepts_prefixed_commands() -> None:
     result = runner.invoke(app, [], input="netorium version\nquit\n")
 
     assert result.exit_code == 0
-    assert "Netorium CLI 0.1.0" in result.output
+    assert f"{APP_NAME} {get_version()}" in result.output
 
 
 def test_interactive_shell_maps_help_to_command_help() -> None:

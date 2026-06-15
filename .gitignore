@@ -19,6 +19,7 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.venv-release/
 venv/
 env/
 .env
@@ -27,6 +28,7 @@ env/
 .eggs/
 build/
 dist/
+release-assets/
 site/
 .idea/
 .vscode/
@@ -34,4 +36,4 @@ site/
 *.swo
 .DS_Store
 Thumbs.db
-
+RELEASE_BUILD.md

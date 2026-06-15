@@ -32,6 +32,47 @@ On Windows, download `netorium-windows-x64.exe` and run:
 .\netorium-windows-x64.exe --help
 ```
 
+## Local Standalone Build
+
+From the repository root:
+
+```bash
+scripts/build-standalone.sh
+```
+
+This creates `.venv-release`, installs release dependencies inside that venv,
+and copies the native binary to `release-assets/`. It does not require the
+exact `python3.11` command; it accepts any local Python 3.11+ command such as
+`python3` or `python3.14`.
+
+If you build manually, create and activate a venv before running pip:
+
+```bash
+python3 -m venv .venv-release
+source .venv-release/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[release]"
+python -m PyInstaller --noconfirm --clean packaging/netorium.spec
+```
+
+## Windows EXE on Windows
+
+Build the Windows standalone executable on Windows, not on Linux. PyInstaller
+builds for the current OS, so native Linux Python cannot produce
+`netorium-windows-x64.exe`.
+
+In Windows PowerShell from the repository root:
+
+```powershell
+.\scripts\build-windows.ps1
+```
+
+The helper copies the result to:
+
+```text
+release-assets/netorium-windows-x64.exe
+```
+
 ## GitHub Install
 
 Linux / macOS:

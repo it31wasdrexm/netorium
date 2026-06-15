@@ -4,9 +4,12 @@ import pytest
 import requests
 
 from netorium.services.update_checker import (
+    DEFAULT_GITHUB_REPO,
     PLACEHOLDER_REPO,
     UpdateCheckError,
     UpdateConfig,
+    build_download_instructions,
+    build_update_config,
     check_for_update,
     compare_versions,
 )
@@ -91,6 +94,22 @@ def test_github_update_check_rejects_placeholder_repo() -> None:
             current_version="0.1.0",
             client=FakeClient(FakeResponse(200, {"tag_name": "v0.2.0"})),
         )
+
+
+def test_build_update_config_uses_real_default_for_placeholder_repo() -> None:
+    config = build_update_config("github", PLACEHOLDER_REPO)
+
+    assert config.repo == DEFAULT_GITHUB_REPO
+
+
+def test_download_instructions_include_release_assets_and_docker() -> None:
+    instructions = build_download_instructions(repo=PLACEHOLDER_REPO)
+
+    assert instructions.release_url == "https://github.com/it31wasdrexm/netorium/releases/latest"
+    assert "install.sh" in instructions.linux_macos_installer
+    assert "install.ps1" in instructions.windows_installer
+    assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" == instructions.docker_run
+    assert "netorium-windows-x64.exe" in instructions.standalone_assets
 
 
 def test_update_check_handles_network_failure() -> None:

@@ -31,7 +31,7 @@ chat_id = "CHANGE_ME"
 
 [updates]
 source = "github"
-repo = "OWNER/REPO"
+repo = "it31wasdrexm/netorium"
 check_on_start = true
 """
 

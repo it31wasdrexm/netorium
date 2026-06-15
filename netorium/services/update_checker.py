@@ -8,6 +8,8 @@ import requests
 from netorium.core.metadata import get_version
 
 DEFAULT_PACKAGE_NAME = "netorium-cli"
+DEFAULT_GITHUB_REPO = "it31wasdrexm/netorium"
+DEFAULT_DOCKER_IMAGE = "ghcr.io/it31wasdrexm/netorium:latest"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 PLACEHOLDER_REPO = "OWNER/REPO"
 
@@ -51,6 +53,17 @@ class UpdateInfo:
         return compare_versions(self.latest_version, self.current_version) > 0
 
 
+@dataclass(frozen=True)
+class DownloadInstructions:
+    release_url: str
+    linux_macos_installer: str
+    windows_installer: str
+    pypi_install: str
+    docker_run: str
+    docker_build: str
+    standalone_assets: tuple[str, ...]
+
+
 def check_for_update(
     config: UpdateConfig,
     current_version: str | None = None,
@@ -86,10 +99,43 @@ def build_update_config(source: str, repo: str, package_name: str = DEFAULT_PACK
     normalized_source = source.lower()
     if normalized_source not in ("github", "pypi"):
         raise UpdateCheckError(f"Unsupported update source: {source}")
+    normalized_repo = repo.strip()
+    if normalized_source == "github" and (
+        not normalized_repo or normalized_repo == PLACEHOLDER_REPO
+    ):
+        normalized_repo = DEFAULT_GITHUB_REPO
     return UpdateConfig(
         source=cast(UpdateSource, normalized_source),
-        repo=repo,
+        repo=normalized_repo,
         package_name=package_name,
+    )
+
+
+def build_download_instructions(
+    repo: str = DEFAULT_GITHUB_REPO,
+    package_name: str = DEFAULT_PACKAGE_NAME,
+    docker_image: str = DEFAULT_DOCKER_IMAGE,
+) -> DownloadInstructions:
+    active_repo = repo.strip()
+    if not active_repo or active_repo == PLACEHOLDER_REPO:
+        active_repo = DEFAULT_GITHUB_REPO
+
+    raw_base_url = f"https://raw.githubusercontent.com/{active_repo}/main"
+    release_url = f"https://github.com/{active_repo}/releases/latest"
+
+    return DownloadInstructions(
+        release_url=release_url,
+        linux_macos_installer=f"curl -fsSL {raw_base_url}/install.sh | bash",
+        windows_installer=f"irm {raw_base_url}/install.ps1 | iex",
+        pypi_install=f"pipx install --force {package_name}",
+        docker_run=f"docker run --rm -it {docker_image}",
+        docker_build="docker build -t netorium-cli .",
+        standalone_assets=(
+            "netorium-windows-x64.exe",
+            "netorium-linux-x64",
+            "netorium-macos-x64",
+            "netorium-macos-arm64",
+        ),
     )
 
 

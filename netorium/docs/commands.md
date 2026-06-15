@@ -52,6 +52,8 @@ netorium update install
 
 Update commands check the configured GitHub release or PyPI package and print safe
 manual install commands. They do not run package-manager commands automatically.
+`netorium update show` and `netorium update install` also print the GitHub release
+page, standalone binary names, and Docker commands for machines without Python.
 
 ## Zones
 

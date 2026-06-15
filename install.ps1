@@ -4,6 +4,9 @@ $GithubRepo = if ($env:NETORIUM_GITHUB_REPO) { $env:NETORIUM_GITHUB_REPO } else 
 $GithubRef = if ($env:NETORIUM_GITHUB_REF) { $env:NETORIUM_GITHUB_REF } else { "main" }
 $GithubRefKind = if ($env:NETORIUM_GITHUB_REF_KIND) { $env:NETORIUM_GITHUB_REF_KIND } else { "heads" }
 $PackageSpec = $env:NETORIUM_PACKAGE_SPEC
+$DefaultLocalAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
+$VenvDir = if ($env:NETORIUM_VENV_DIR) { $env:NETORIUM_VENV_DIR } else { Join-Path $DefaultLocalAppData "Netorium\venv" }
+$BinDir = if ($env:NETORIUM_BIN_DIR) { $env:NETORIUM_BIN_DIR } else { Join-Path $DefaultLocalAppData "Netorium\bin" }
 
 function Test-PythonCommand {
     param (
@@ -58,18 +61,36 @@ if (Get-Command pipx -ErrorAction SilentlyContinue) {
 } else {
     $Python = Get-PythonCommand
     if ($null -eq $Python) {
-        Write-Error "Python 3.11+ or pipx is required to install Netorium CLI."
+        Write-Error "Python 3.11+ or pipx is required for this installer. For no-Python machines, use the standalone release binary or Docker image: https://github.com/$GithubRepo/releases/latest"
         exit 1
     }
 
-    & $Python.Command @($Python.Arguments + @("-m", "pip", "install", "--user", "--upgrade", $PackageSpec))
+    & $Python.Command @($Python.Arguments + @("-m", "venv", $VenvDir))
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
 
-    $ScriptsDir = & $Python.Command @($Python.Arguments + @("-c", "import os, site; print(os.path.join(site.getuserbase(), 'Scripts'))")) 2>$null
-    if ($ScriptsDir -and ($env:PATH -notlike "*$ScriptsDir*")) {
-        Write-Host "If netorium is not recognized, add this directory to PATH: $ScriptsDir"
+    $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+    & $VenvPython -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    & $VenvPython -m pip install --upgrade $PackageSpec
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    New-Item -ItemType Directory -Force $BinDir *> $null
+    $NetoriumExe = Join-Path $VenvDir "Scripts\netorium.exe"
+    $CmdPath = Join-Path $BinDir "netorium.cmd"
+    Set-Content -Path $CmdPath -Encoding ASCII -Value @(
+        "@echo off",
+        "`"$NetoriumExe`" %*"
+    )
+
+    if ($env:PATH -notlike "*$BinDir*") {
+        Write-Host "If netorium is not recognized, add this directory to PATH: $BinDir"
     }
 }
 

@@ -41,6 +41,9 @@ def test_docs_install_page() -> None:
     assert result.exit_code == 0
     assert "Installation" in result.output
     assert "NETORIUM_GITHUB_REPO" in result.output
+    assert "No-Python Options" in result.output
+    assert "netorium-windows-x64.exe" in result.output
+    assert "Docker" in result.output
 
 
 def test_docs_troubleshooting_page() -> None:
@@ -49,6 +52,7 @@ def test_docs_troubleshooting_page() -> None:
     assert result.exit_code == 0
     assert "Troubleshooting" in result.output
     assert "Config File Not Found" in result.output
+    assert "Update Release Not Found" in result.output
 
 
 def test_docs_missing_page_fails_gracefully(monkeypatch: pytest.MonkeyPatch) -> None:

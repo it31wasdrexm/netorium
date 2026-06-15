@@ -1,17 +1,49 @@
 # Installation
 
+## No-Python Options
+
+Use GitHub Releases when the target PC should not have Python installed.
+
+Release page:
+
+```text
+https://github.com/it31wasdrexm/netorium/releases/latest
+```
+
+Download the matching standalone asset:
+
+```text
+netorium-windows-x64.exe
+netorium-linux-x64
+netorium-macos-x64
+netorium-macos-arm64
+```
+
+Linux and macOS need the executable bit after download:
+
+```bash
+chmod +x ./netorium-linux-x64
+./netorium-linux-x64 --help
+```
+
+On Windows, download `netorium-windows-x64.exe` and run:
+
+```powershell
+.\netorium-windows-x64.exe --help
+```
+
 ## GitHub Install
 
 Linux / macOS:
 
 ```bash
-curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh | bash
 ```
 
 To install from another fork or repository:
 
 ```bash
-curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh \
   | NETORIUM_GITHUB_REPO=OWNER/REPO bash
 ```
 
@@ -33,7 +65,7 @@ irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1 | i
 After the package is published to PyPI:
 
 ```bash
-curl -fsSL https://github.com/it31wasdrexm/netorium/raw/main/install.sh | NETORIUM_INSTALL_SOURCE=pypi bash
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh | NETORIUM_INSTALL_SOURCE=pypi bash
 ```
 
 ```powershell
@@ -44,8 +76,39 @@ irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1 | i
 ## Windows Installer Behavior
 
 The Windows installer uses `pipx` when it is available. If `pipx` is not
-installed, it looks for Python 3.11+ through `py -3`, `python`, then `python3`,
-and installs Netorium with `pip --user`.
+installed, it looks for Python 3.11+ through `py -3`, `python`, then `python3`
+and installs Netorium into a dedicated user virtual environment.
+
+## Docker
+
+Docker does not require Python on the host PC.
+
+Run the published image after the release workflow publishes it:
+
+```bash
+docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest --help
+```
+
+Build locally from a source checkout:
+
+```bash
+docker build -t netorium-cli .
+docker run --rm -it netorium-cli --help
+```
+
+Mount config and data volumes for persistent local state:
+
+```bash
+docker run --rm -it \
+  -v netorium-config:/root/.config/netorium \
+  -v netorium-data:/root/.local/share/netorium \
+  ghcr.io/it31wasdrexm/netorium:latest config path
+```
+
+Docker is suitable for CLI checks, docs, config, inventory, integrations, and
+dry-run workflows. It cannot directly manage the host Windows Firewall; use a
+native Windows executable, future controller/agent flow, or supported Windows
+remote management for real endpoint firewall changes.
 
 ## Local Checkout
 
@@ -63,4 +126,5 @@ netorium --help
 netorium version
 netorium config init
 netorium doctor
+netorium update show
 ```

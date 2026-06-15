@@ -27,6 +27,9 @@ dev = [
   "mypy>=1.10",
   "pre-commit>=3.7",
 ]
+release = [
+  "pyinstaller>=6.9",
+]
 
 [project.scripts]
 netorium = "netorium.cli.app:app"

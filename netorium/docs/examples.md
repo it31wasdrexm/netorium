@@ -48,6 +48,18 @@ netorium update check
 netorium update show
 ```
 
+Show download options for a PC without Python:
+
+```bash
+netorium update install
+```
+
+Run Netorium through Docker:
+
+```bash
+docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest --help
+```
+
 Create the first zone and inspect the audit log:
 
 ```bash

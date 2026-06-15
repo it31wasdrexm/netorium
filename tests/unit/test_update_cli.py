@@ -37,6 +37,9 @@ def test_update_show_renders_details(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Netorium Update" in result.output
     assert "Latest version" in result.output
     assert "python -m pip install --upgrade netorium-cli" in result.output
+    assert "Download Options" in result.output
+    assert "netorium-windows-x64.exe" in result.output
+    assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" in result.output
 
 
 def test_update_install_prints_manual_commands(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,6 +51,25 @@ def test_update_install_prints_manual_commands(monkeypatch: pytest.MonkeyPatch) 
     assert "Automatic installation is not enabled yet." in result.output
     assert "pipx upgrade netorium-cli" in result.output
     assert "python -m pip install --upgrade netorium-cli" in result.output
+    assert "Download Options" in result.output
+    assert "netorium-linux-x64" in result.output
+
+
+def test_update_install_still_shows_downloads_when_check_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail() -> UpdateInfo:
+        raise UpdateCheckError("release not found")
+
+    monkeypatch.setattr(update_command, "_run_update_check", fail)
+
+    result = runner.invoke(app, ["update", "install"])
+
+    assert result.exit_code == 0
+    assert "Update check unavailable" in result.output
+    assert "release not found" in result.output
+    assert "Download Options" in result.output
+    assert "github.com/it31wasdrexm/netorium/releases/latest" in result.output
 
 
 def test_update_check_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,6 +87,7 @@ def test_update_check_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 1
     assert "network is unavailable" in result.output
+    assert "Download options" in result.output
 
 
 def _new_release() -> UpdateInfo:

@@ -65,6 +65,7 @@ def test_init_config_writes_valid_default_config(tmp_path: Path) -> None:
 
     assert created_path == config_path
     assert settings.app.timezone == "Asia/Almaty"
+    assert settings.updates.repo == "it31wasdrexm/netorium"
     assert settings.updates.check_on_start is True
 
 

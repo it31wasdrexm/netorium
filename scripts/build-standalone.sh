@@ -43,6 +43,25 @@ asset_arch() {
   esac
 }
 
+find_venv_python() {
+  local candidate
+  for candidate in "$VENV_DIR/bin/python" "$VENV_DIR/bin/python3"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+report_missing_venv_python() {
+  echo "Could not find an executable Python in $VENV_DIR." >&2
+  echo "The release virtual environment may be incomplete or corrupted." >&2
+  echo "Remove it and rerun this script:" >&2
+  echo "  rm -rf $VENV_DIR" >&2
+}
+
 python_bin="$(find_python)" || {
   echo "Python 3.11+ was not found." >&2
   echo "Install Python 3.11+ or set NETORIUM_PYTHON=/path/to/python." >&2
@@ -51,13 +70,28 @@ python_bin="$(find_python)" || {
 
 echo "Using Python: $("$python_bin" -c 'import sys; print(sys.executable + " " + sys.version.split()[0])')"
 
-if ! "$python_bin" -m venv "$VENV_DIR"; then
-  echo "Could not create $VENV_DIR." >&2
-  echo "On Debian/Ubuntu, install the venv package for the selected Python, such as python3-full." >&2
-  exit 1
+VENV_PYTHON=""
+if [[ -d "$VENV_DIR" ]]; then
+  if ! VENV_PYTHON="$(find_venv_python)"; then
+    VENV_PYTHON=""
+  fi
 fi
 
-VENV_PYTHON="$VENV_DIR/bin/python"
+if [[ -z "$VENV_PYTHON" ]]; then
+  if ! "$python_bin" -m venv "$VENV_DIR"; then
+    echo "Could not create $VENV_DIR." >&2
+    echo "On Debian/Ubuntu, install the venv package for the selected Python, such as python3-full." >&2
+    exit 1
+  fi
+
+  VENV_PYTHON="$(find_venv_python)" || {
+    report_missing_venv_python
+    exit 1
+  }
+fi
+
+echo "Using venv Python: $("$VENV_PYTHON" -c 'import sys; print(sys.executable + " " + sys.version.split()[0])')"
+
 "$VENV_PYTHON" -m pip install --upgrade pip
 "$VENV_PYTHON" -m pip install -e ".[release]"
 "$VENV_PYTHON" -m PyInstaller --noconfirm --clean packaging/netorium.spec
@@ -86,5 +120,5 @@ if [[ ! -f "$source_path" ]]; then
   exit 1
 fi
 
-cp "$source_path" "$ASSET_DIR/$asset_name"
+install -m 755 "$source_path" "$ASSET_DIR/$asset_name"
 echo "Built: $ASSET_DIR/$asset_name"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netorium-cli"
-version = "0.1.0"
+version = "0.4.3"
 description = "Cross-platform CLI for building-level network access control."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,7 +15,7 @@ dependencies = [
   "rich>=13.7",
   "requests>=2.32",
   "ldap3>=2.9",
-  "pydantic>=2.7",
+  "pydantic>=2.7",                                                                                                                            
   "pydantic-settings>=2.2",
 ]
 

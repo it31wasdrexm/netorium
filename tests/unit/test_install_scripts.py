@@ -75,14 +75,24 @@ def test_local_release_helpers_use_native_asset_names() -> None:
 
     assert "NETORIUM_PYTHON" in windows
     assert "Python 3.11+ was not found" in windows
+    assert "[switch] $InstallUser" in windows
+    assert "[switch] $NoInstallUser" in windows
+    assert "[switch] $SkipVerify" in windows
     assert ".venv-release-win" in windows
     assert ".netorium-release-tmp" in windows
+    assert "NETORIUM_BIN_DIR" in windows
     assert "$env:TEMP" in windows
     assert "$env:PIP_CACHE_DIR" in windows
     assert "$env:PYINSTALLER_CONFIG_DIR" in windows
     assert 'Join-Path "dist" "netorium.exe"' in windows
     assert "netorium-windows-$(Get-AssetArch).exe" in windows
+    assert 'Invoke-NativeCommand -Command $ResolvedTargetPath -Arguments @("version")' in windows
+    assert 'Join-Path $ResolvedBinDir "netorium.exe"' in windows
+    assert "Add-UserPathEntry" in windows
+    assert "$ShouldInstallUser = -not $NoInstallUser" in windows
+    assert "Build only without installing command" in windows
     assert "NETORIUM_WINE_PYTHON" not in windows
+    assert "netorium.cmd" not in windows
     assert "${LASTEXITCODE}:" in windows
     assert "$LASTEXITCODE:" not in windows
     assert (PROJECT_ROOT / "scripts" / "build-windows.cmd").exists() is False
@@ -100,6 +110,9 @@ def test_install_docs_document_native_linux_and_windows_release_assets() -> None
     assert ".venv-release-win" in text
     assert ".netorium-release-tmp" in text
     assert "release-assets/netorium-windows-x64.exe" in text
+    assert "netorium version" in text
+    assert ".\\scripts\\build-windows.ps1 -NoInstallUser" in text
+    assert "%LOCALAPPDATA%\\Netorium\\bin\\netorium.exe" in text
     assert "runs on the target Windows PC without" in text
     assert "Python installed" in text
     assert "Build the Windows standalone executable on Windows" in text

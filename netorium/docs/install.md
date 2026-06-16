@@ -99,6 +99,25 @@ The helper copies the result to:
 release-assets/netorium-windows-x64.exe
 ```
 
+It also verifies the standalone executable by running `version`, installs the
+same no-Python executable as the current user's `netorium` command, and checks
+that command:
+
+```powershell
+.\scripts\build-windows.ps1
+netorium version
+```
+
+This copies the executable to `%LOCALAPPDATA%\Netorium\bin\netorium.exe` and
+adds that directory to the current user's `PATH`. Open a new PowerShell window
+if the current terminal still cannot find `netorium`.
+
+To build only the release asset without installing the `netorium` command:
+
+```powershell
+.\scripts\build-windows.ps1 -NoInstallUser
+```
+
 The build machine still needs Python 3.11+ to create the executable. The
 resulting `netorium-windows-x64.exe` runs on the target Windows PC without
 Python installed.
@@ -202,7 +221,8 @@ py -3 -m venv .venv-win
 ```
 
 To make `netorium` available from any new terminal, install through the Windows
-installer or add the chosen Scripts/bin directory to `PATH`.
+installer, run `.\scripts\build-windows.ps1`, or add the chosen Scripts/bin
+directory to `PATH`.
 
 ## Verify
 

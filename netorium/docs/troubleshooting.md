@@ -106,14 +106,30 @@ The expected release asset is:
 release-assets/netorium-windows-x64.exe
 ```
 
+The helper verifies that artifact by running `version`, installs the bare
+`netorium` command for the current Windows user, and checks that command:
+
+```powershell
+.\scripts\build-windows.ps1
+netorium version
+```
+
 Python 3.11+ is required only on the Windows build machine. The generated
 `netorium-windows-x64.exe` is the no-Python artifact for target Windows PCs.
 
 ## Netorium Command Not Recognized on Windows
 
 A source checkout does not create a global `netorium` command by itself. If
-`netorium` is not recognized, install it or run it through a Windows venv from
-the repository root:
+`netorium` is not recognized after building the standalone executable, rebuild
+and install that executable for the current user:
+
+```powershell
+.\scripts\build-windows.ps1
+netorium version
+```
+
+If you want to run from source instead, use a Windows venv from the repository
+root:
 
 ```powershell
 py -3 -m venv .venv-win

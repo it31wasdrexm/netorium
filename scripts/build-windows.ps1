@@ -1,3 +1,9 @@
+param(
+    [switch] $InstallUser,
+    [switch] $NoInstallUser,
+    [switch] $SkipVerify
+)
+
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -93,6 +99,109 @@ function Invoke-NativeCommand {
     }
 }
 
+function Get-DefaultLocalAppData {
+    if ($env:LOCALAPPDATA) {
+        return $env:LOCALAPPDATA
+    }
+
+    if ($env:USERPROFILE) {
+        return Join-Path $env:USERPROFILE "AppData\Local"
+    }
+
+    throw "LOCALAPPDATA and USERPROFILE are not set. Set NETORIUM_BIN_DIR to choose the install directory."
+}
+
+function Normalize-PathEntry {
+    param(
+        [string] $PathEntry
+    )
+
+    $TrimChars = @(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    return $PathEntry.Trim().TrimEnd($TrimChars)
+}
+
+function Test-PathEntry {
+    param(
+        [string] $PathValue,
+        [string] $PathEntry
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    $NormalizedPathEntry = Normalize-PathEntry -PathEntry $PathEntry
+    foreach ($ExistingEntry in ($PathValue -split [System.IO.Path]::PathSeparator)) {
+        if ((Normalize-PathEntry -PathEntry $ExistingEntry) -ieq $NormalizedPathEntry) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Join-PathEntries {
+    param(
+        [string] $PathValue,
+        [string] $PathEntry
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $PathEntry
+    }
+
+    return "$PathValue$([System.IO.Path]::PathSeparator)$PathEntry"
+}
+
+function Add-UserPathEntry {
+    param(
+        [string] $PathEntry
+    )
+
+    $UserPath = [System.Environment]::GetEnvironmentVariable(
+        "Path",
+        [System.EnvironmentVariableTarget]::User
+    )
+    if (-not (Test-PathEntry -PathValue $UserPath -PathEntry $PathEntry)) {
+        $NewUserPath = Join-PathEntries -PathValue $UserPath -PathEntry $PathEntry
+        [System.Environment]::SetEnvironmentVariable(
+            "Path",
+            $NewUserPath,
+            [System.EnvironmentVariableTarget]::User
+        )
+        Write-Host "Added to user PATH: $PathEntry"
+    }
+
+    $env:Path = Join-PathEntries -PathValue $PathEntry -PathEntry $env:Path
+}
+
+function Install-UserCommand {
+    param(
+        [string] $SourcePath
+    )
+
+    $DefaultLocalAppData = Get-DefaultLocalAppData
+    $BinDir = if ($env:NETORIUM_BIN_DIR) {
+        $env:NETORIUM_BIN_DIR
+    } else {
+        Join-Path $DefaultLocalAppData "Netorium\bin"
+    }
+
+    $ResolvedBinDir = (New-Item -ItemType Directory -Force -Path $BinDir).FullName
+    $InstalledPath = Join-Path $ResolvedBinDir "netorium.exe"
+    Copy-Item $SourcePath $InstalledPath -Force
+    Add-UserPathEntry -PathEntry $ResolvedBinDir
+
+    Write-Host "Installed command: $InstalledPath"
+    Write-Host "Verifying installed command:"
+    Invoke-NativeCommand -Command "netorium" -Arguments @("version")
+    Write-Host "Run: netorium --help"
+    Write-Host "If this terminal still cannot find netorium, open a new PowerShell window."
+}
+
 $Python = Get-PythonCommand
 Write-Host "Using Python:"
 Invoke-ReleasePython -Python $Python -Arguments @("-c", "import sys; print(sys.executable + ' ' + sys.version.split()[0])")
@@ -119,3 +228,24 @@ $AssetName = "netorium-windows-$(Get-AssetArch).exe"
 $TargetPath = Join-Path $AssetDir $AssetName
 Copy-Item $SourcePath $TargetPath -Force
 Write-Host "Built: $TargetPath"
+$ResolvedTargetPath = (Resolve-Path $TargetPath).Path
+if (-not $SkipVerify) {
+    Write-Host "Verifying standalone build:"
+    Invoke-NativeCommand -Command $ResolvedTargetPath -Arguments @("version")
+}
+
+$ShouldInstallUser = -not $NoInstallUser
+if ($InstallUser) {
+    $ShouldInstallUser = $true
+}
+
+if ($ShouldInstallUser) {
+    Install-UserCommand -SourcePath $ResolvedTargetPath
+} else {
+    Write-Host "Skipped current-user command install."
+}
+
+Write-Host "Run standalone build: .\$TargetPath --help"
+Write-Host "Verify standalone build: .\$TargetPath version"
+Write-Host "Run installed command: netorium --help"
+Write-Host "Build only without installing command: .\scripts\build-windows.ps1 -NoInstallUser"

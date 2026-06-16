@@ -77,7 +77,7 @@ function Invoke-ReleasePython {
     $BaseArguments = [string[]] $Python["Arguments"]
     & $Command @($BaseArguments + $Arguments)
     if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE: $Command $(($BaseArguments + $Arguments) -join ' ')"
+        throw "Command failed with exit code ${LASTEXITCODE}: $Command $(($BaseArguments + $Arguments) -join ' ')"
     }
 }
 
@@ -89,7 +89,7 @@ function Invoke-NativeCommand {
 
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE: $Command $($Arguments -join ' ')"
+        throw "Command failed with exit code ${LASTEXITCODE}: $Command $($Arguments -join ' ')"
     }
 }
 

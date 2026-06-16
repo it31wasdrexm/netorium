@@ -49,7 +49,9 @@ def test_install_docs_include_download_commands() -> None:
     assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" in text
     assert "scripts/build-standalone.sh" in text
     assert ".\\scripts\\build-windows.ps1" in text
-    assert "-ExecutionPolicy Bypass" in text
+    assert "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force" in text
+    assert "Unblock-File .\\scripts\\build-windows.ps1" in text
+    assert "-ExecutionPolicy Bypass" not in text
     assert ".venv-win" in text
     assert ".venv-release-win" in text
     assert "Build the Windows standalone executable on Windows" in text
@@ -81,7 +83,9 @@ def test_local_release_helpers_use_native_asset_names() -> None:
     assert 'Join-Path "dist" "netorium.exe"' in windows
     assert "netorium-windows-$(Get-AssetArch).exe" in windows
     assert "NETORIUM_WINE_PYTHON" not in windows
-    assert "build-windows.cmd" not in windows
+    assert "${LASTEXITCODE}:" in windows
+    assert "$LASTEXITCODE:" not in windows
+    assert (PROJECT_ROOT / "scripts" / "build-windows.cmd").exists() is False
 
 
 def test_install_docs_document_native_linux_and_windows_release_assets() -> None:
@@ -90,10 +94,14 @@ def test_install_docs_document_native_linux_and_windows_release_assets() -> None
     assert "scripts/build-standalone.sh" in text
     assert ".\\scripts\\build-windows.ps1" in text
     assert ".\\scripts\\build-windows.cmd" not in text
-    assert "-ExecutionPolicy Bypass" in text
+    assert "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force" in text
+    assert "Unblock-File .\\scripts\\build-windows.ps1" in text
+    assert "-ExecutionPolicy Bypass" not in text
     assert ".venv-release-win" in text
     assert ".netorium-release-tmp" in text
     assert "release-assets/netorium-windows-x64.exe" in text
+    assert "runs on the target Windows PC without" in text
+    assert "Python installed" in text
     assert "Build the Windows standalone executable on Windows" in text
     assert "scripts/build-windows-on-linux.sh" not in text
 

@@ -46,6 +46,7 @@ def test_docs_install_page() -> None:
     assert "Docker" in result.output
     assert "Local Standalone Build" in result.output
     assert "Windows EXE on Windows" in result.output
+    assert "RemoteSigned" in result.output
     assert "build-windows.cmd" not in result.output
     assert ".venv-win" in result.output
 
@@ -60,6 +61,7 @@ def test_docs_troubleshooting_page() -> None:
     assert "Local Release Venv Fails" in result.output
     assert "Windows EXE Build" in result.output
     assert "Command Not Recognized" in result.output
+    assert "RemoteSigned" in result.output
     assert "build-windows.cmd" not in result.output
 
 

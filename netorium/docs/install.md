@@ -67,10 +67,20 @@ In Windows PowerShell from the repository root:
 .\scripts\build-windows.ps1
 ```
 
-If PowerShell blocks local scripts with an execution policy error, run either:
+If PowerShell blocks local scripts with an execution policy error, allow local
+user scripts once, then run the same direct command again:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+.\scripts\build-windows.ps1
+```
+
+If the file was downloaded from the internet and is still blocked, unblock this
+script once:
+
+```powershell
+Unblock-File .\scripts\build-windows.ps1
+.\scripts\build-windows.ps1
 ```
 
 The helper uses `.venv-release-win` by default so a checkout that already has a
@@ -88,6 +98,10 @@ The helper copies the result to:
 ```text
 release-assets/netorium-windows-x64.exe
 ```
+
+The build machine still needs Python 3.11+ to create the executable. The
+resulting `netorium-windows-x64.exe` runs on the target Windows PC without
+Python installed.
 
 ## GitHub Install
 

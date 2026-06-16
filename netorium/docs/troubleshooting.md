@@ -76,10 +76,19 @@ Build the Windows executable on Windows:
 ```
 
 If Windows PowerShell prints that running scripts is disabled on this system,
-use a process-local bypass:
+allow local user scripts once, then run the same direct command again:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+.\scripts\build-windows.ps1
+```
+
+If the file was downloaded from the internet and is still blocked, unblock this
+script once:
+
+```powershell
+Unblock-File .\scripts\build-windows.ps1
+.\scripts\build-windows.ps1
 ```
 
 The helper uses `.venv-release-win` by default so it does not mix files with a
@@ -96,6 +105,9 @@ The expected release asset is:
 ```text
 release-assets/netorium-windows-x64.exe
 ```
+
+Python 3.11+ is required only on the Windows build machine. The generated
+`netorium-windows-x64.exe` is the no-Python artifact for target Windows PCs.
 
 ## Netorium Command Not Recognized on Windows
 

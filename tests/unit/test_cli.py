@@ -29,6 +29,8 @@ def test_help_shows_main_commands() -> None:
     assert "config" in result.output
     assert "docs" in result.output
     assert "update" in result.output
+    assert "controller" in result.output
+    assert "deploy" in result.output
     assert "zone" in result.output
     assert "device" in result.output
     assert "firewall" in result.output

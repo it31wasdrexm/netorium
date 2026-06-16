@@ -10,6 +10,7 @@ def test_load_doc_page_reads_packaged_markdown() -> None:
     assert "# Netorium CLI" in text
     assert "netorium docs commands" in text
     assert "netorium docs install" in text
+    assert "netorium-agent --help" in text
 
 
 def test_load_doc_page_rejects_unknown_page() -> None:

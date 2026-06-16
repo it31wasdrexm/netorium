@@ -1,14 +1,11 @@
-# Netorium Agent installer draft for Windows.
-# This is a template. Real implementation must verify package signatures/checksums.
+$ErrorActionPreference = "Stop"
 
-$PackageName = "netorium-cli"
+$GithubRepo = if ($env:NETORIUM_GITHUB_REPO) { $env:NETORIUM_GITHUB_REPO } else { "it31wasdrexm/netorium" }
+$RawBaseUrl = "https://raw.githubusercontent.com/$GithubRepo/main"
+$InstallUrl = if ($env:NETORIUM_INSTALL_URL) { $env:NETORIUM_INSTALL_URL } else { "$RawBaseUrl/install.ps1" }
 
-if (Get-Command pipx -ErrorAction SilentlyContinue) {
-    pipx install $PackageName
-} else {
-    py -m pip install --user $PackageName
-}
+irm $InstallUrl | iex
 
 Write-Host "Netorium Agent installed."
 Write-Host "Next:"
-Write-Host "  netorium-agent enroll --controller https://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"
+Write-Host "  netorium-agent enroll --controller http://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"

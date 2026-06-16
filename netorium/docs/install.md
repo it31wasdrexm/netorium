@@ -169,6 +169,18 @@ The Windows installer uses `pipx` when it is available. If `pipx` is not
 installed, it looks for Python 3.11+ through `py -3`, `python`, then `python3`
 and installs Netorium into a dedicated user virtual environment.
 
+If neither `pipx` nor Python 3.11+ is installed, the default GitHub installer
+downloads the latest standalone Windows executable from GitHub Releases,
+installs it as:
+
+```text
+%LOCALAPPDATA%\Netorium\bin\netorium.exe
+```
+
+and adds that directory to the current user's `PATH`. The release may publish
+the executable as `netorium-windows-x64.exe` or `netorium.exe`; the installer
+accepts both names.
+
 ## Docker
 
 Docker does not require Python on the host PC.
@@ -199,6 +211,37 @@ Docker is suitable for CLI checks, docs, config, inventory, integrations, and
 dry-run workflows. It cannot directly manage the host Windows Firewall; use a
 native Windows executable, future controller/agent flow, or supported Windows
 remote management for real endpoint firewall changes.
+
+## Agent Deployment Helpers
+
+After initializing the local controller, print copy-paste install/enroll
+commands for office PCs:
+
+```bash
+netorium controller init
+netorium deploy instructions
+netorium deploy token create --zone accounting --ttl 24h
+```
+
+Generate an agent deployment script:
+
+```bash
+netorium deploy script windows --output install-agent.ps1
+netorium deploy script linux --output install-agent.sh
+```
+
+These helpers export the local controller URL and one-time enrollment tokens.
+After installing on an endpoint, enroll the agent:
+
+```bash
+netorium-agent enroll --controller http://192.168.1.10:8765 --token TOKEN
+netorium-agent status
+netorium-agent run
+```
+
+The current agent stores endpoint state locally, does not print enrollment or
+device tokens, and sends heartbeat checks to the controller. Endpoint firewall
+application, command signing, and rollback are the next deployment phase.
 
 ## Local Checkout
 

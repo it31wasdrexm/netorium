@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netorium-cli"
-version = "0.4.8"
+version = "0.5.0"
 description = "Cross-platform CLI for building-level network access control."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,6 +33,7 @@ release = [
 
 [project.scripts]
 netorium = "netorium.cli.app:app"
+netorium-agent = "netorium.cli.agent:app"
 
 [tool.setuptools.packages.find]
 include = ["netorium*"]

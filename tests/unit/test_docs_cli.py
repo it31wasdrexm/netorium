@@ -23,6 +23,11 @@ def test_docs_commands_page() -> None:
     assert "Configuration" in result.output
     assert "interactive mode" in result.output
     assert "uninstall --yes --remove-data" in result.output
+    assert "controller token create" in result.output
+    assert "deploy script windows" in result.output
+    assert "netorium-agent enroll" in result.output
+    assert "sends a heartbeat" in result.output
+    assert "shown only once" in result.output
 
 
 def test_docs_examples_page() -> None:
@@ -33,6 +38,9 @@ def test_docs_examples_page() -> None:
     assert "config validate" in result.output
     assert "netorium> version" in result.output
     assert "netorium uninstall" in result.output
+    assert "netorium controller init" in result.output
+    assert "netorium deploy instructions" in result.output
+    assert "netorium-agent status" in result.output
 
 
 def test_docs_install_page() -> None:
@@ -50,6 +58,9 @@ def test_docs_install_page() -> None:
     assert "netorium version" in result.output
     assert "-NoInstallUser" in result.output
     assert "%LOCALAPPDATA%\\Netorium\\bin\\netorium.exe" in result.output
+    assert "netorium deploy instructions" in result.output
+    assert "netorium-agent enroll" in result.output
+    assert "heartbeat checks" in result.output
     assert "build-windows.cmd" not in result.output
     assert ".venv-win" in result.output
 

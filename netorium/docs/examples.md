@@ -54,6 +54,30 @@ Show download options for a PC without Python:
 netorium update install
 ```
 
+Initialize the local office controller and create an enrollment token:
+
+```bash
+netorium controller init
+netorium controller status
+netorium controller token create --zone accounting --ttl 24h
+```
+
+Export copy-paste agent deployment commands:
+
+```bash
+netorium deploy instructions
+netorium deploy token create --zone accounting --ttl 24h
+netorium deploy script windows --output install-agent.ps1
+```
+
+Enroll and inspect an endpoint agent:
+
+```bash
+netorium-agent enroll --controller http://192.168.1.10:8765 --token TOKEN
+netorium-agent status
+netorium-agent run
+```
+
 Run Netorium through Docker:
 
 ```bash

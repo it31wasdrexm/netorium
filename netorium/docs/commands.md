@@ -59,6 +59,52 @@ current operating system.
 When `check_on_start = true` in the config, interactive mode shows a soft update
 notice at startup if a newer release is available.
 
+## Controller
+
+```bash
+netorium controller init
+netorium controller status
+netorium controller start --host 0.0.0.0 --port 8765
+netorium controller token create --zone accounting --ttl 24h
+```
+
+The controller is a local LAN process for the main administrator PC. It stores
+MVP state in SQLite, prints an enrollment URL for office agents, and creates
+one-time enrollment tokens. Raw enrollment tokens are shown only once; the local
+database stores their hashes.
+
+## Deployment
+
+```bash
+netorium deploy instructions
+netorium deploy token create --zone accounting --ttl 24h
+netorium deploy script windows --output install-agent.ps1
+netorium deploy script linux --output install-agent.sh
+```
+
+Deployment commands export copy-paste agent install/enroll commands for the
+local controller URL. Token creation is shared with the controller token store:
+raw tokens are shown once, while SQLite stores only token hashes.
+
+## Endpoint Agent
+
+```bash
+netorium-agent --help
+netorium-agent enroll --controller http://192.168.1.10:8765 --token TOKEN
+netorium-agent status
+netorium-agent run
+netorium-agent service install
+netorium-agent service start
+netorium-agent service stop
+netorium-agent update check
+```
+
+The agent enrolls with the local controller, stores endpoint state in the user's
+Netorium config directory, and never prints enrollment or device tokens. The
+foreground `run` command sends a heartbeat to the controller and receives the
+current command queue. Endpoint firewall application and rollback are the next
+deployment phase.
+
 ## Zones
 
 ```bash

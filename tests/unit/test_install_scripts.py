@@ -31,9 +31,32 @@ def test_windows_installer_supports_github_pypi_and_local_modes() -> None:
     assert '"python"; Arguments = @()' in text
     assert '"python3"; Arguments = @()' in text
     assert "Python 3.11+ or pipx is required" in text
+    assert "Install-StandaloneRelease" in text
+    assert "NETORIUM_STANDALONE_URL" in text
+    assert "NETORIUM_STANDALONE_ASSET_NAME" in text
+    assert "Invoke-RestMethod -Uri $ReleaseApiUrl" in text
+    assert "Invoke-WebRequest -Uri $DownloadUrl" in text
+    assert "netorium-windows-x64.exe" in text
+    assert "netorium.exe" in text
+    assert "Add-UserPathEntry" in text
     assert '"-m", "venv", $VenvDir' in text
     assert "NETORIUM_VENV_DIR" in text
     assert '"-m", "pip", "install", "--user", "--upgrade"' not in text
+
+
+def test_agent_installers_delegate_to_main_installers() -> None:
+    windows = (PROJECT_ROOT / "install-agent.ps1").read_text(encoding="utf-8")
+    linux = (PROJECT_ROOT / "install-agent.sh").read_text(encoding="utf-8")
+
+    assert "$RawBaseUrl/install.ps1" in windows
+    assert "irm $InstallUrl | iex" in windows
+    assert "py -m pip install --user" not in windows
+    assert "netorium-agent enroll" in windows
+
+    assert "${RAW_BASE_URL}/install.sh" in linux
+    assert 'curl -fsSL "$INSTALL_URL" | bash' in linux
+    assert "python3 -m pip install --user" not in linux
+    assert "netorium-agent enroll" in linux
 
 
 def test_install_docs_include_download_commands() -> None:
@@ -45,8 +68,12 @@ def test_install_docs_include_download_commands() -> None:
     assert "| NETORIUM_INSTALL_SOURCE=pypi bash" in text
     assert "If `pipx` is not" in text
     assert "`py -3`, `python`, then `python3`" in text
+    assert "downloads the latest standalone Windows executable" in text
     assert "netorium-windows-x64.exe" in text
     assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" in text
+    assert "netorium deploy instructions" in text
+    assert "netorium deploy script windows --output install-agent.ps1" in text
+    assert "netorium-agent enroll" in text
     assert "scripts/build-standalone.sh" in text
     assert ".\\scripts\\build-windows.ps1" in text
     assert "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force" in text
@@ -166,6 +193,8 @@ def test_pyproject_declares_build_backend() -> None:
 
     assert "[build-system]" in text
     assert 'build-backend = "setuptools.build_meta"' in text
+    assert 'netorium = "netorium.cli.app:app"' in text
+    assert 'netorium-agent = "netorium.cli.agent:app"' in text
     assert '"pyinstaller>=6.9"' in text
     assert "[tool.setuptools.packages.find]" in text
     assert 'include = ["netorium*"]' in text

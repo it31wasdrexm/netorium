@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_NAME="netorium-cli"
+GITHUB_REPO="${NETORIUM_GITHUB_REPO:-it31wasdrexm/netorium}"
+RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
+INSTALL_URL="${NETORIUM_INSTALL_URL:-${RAW_BASE_URL}/install.sh}"
 
-if command -v pipx >/dev/null 2>&1; then
-  pipx install "$PACKAGE_NAME"
-else
-  python3 -m pip install --user "$PACKAGE_NAME"
-fi
+curl -fsSL "$INSTALL_URL" | bash
 
 echo "Netorium Agent installed."
 echo "Next:"
-echo "  netorium-agent enroll --controller https://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"
+echo "  netorium-agent enroll --controller http://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"

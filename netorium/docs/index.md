@@ -14,6 +14,7 @@ netorium doctor
 netorium config init
 netorium config validate
 netorium update show
+netorium-agent --help
 ```
 
 ## Documentation Pages

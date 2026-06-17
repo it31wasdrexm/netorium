@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 import netorium.cli.agent as agent_module
 from netorium.cli.agent import app
-from netorium.services.agent import AgentRunResult, AgentState, enroll_agent
+from netorium.services.agent import AgentCommandExecution, AgentRunResult, AgentState, enroll_agent
 from tests.unit.path_helpers import isolated_user_env
 
 runner = CliRunner()
@@ -87,9 +87,16 @@ def test_agent_run_sends_heartbeat(monkeypatch) -> None:
     def fake_run_agent_once():
         return AgentRunResult(
             enrolled=True,
-            message="Heartbeat accepted; no endpoint commands are queued yet.",
+            message="Heartbeat accepted; processed 1 endpoint command(s).",
             controller_url="http://192.168.1.10:8765",
             accepted_at="2026-06-16T10:01:00+00:00",
+            command_results=(
+                AgentCommandExecution(
+                    command_id="cmd_123",
+                    status="completed",
+                    message="Dry-run firewall block accepted for 192.168.1.25: Policy test",
+                ),
+            ),
         )
 
     monkeypatch.setattr(agent_module, "run_agent_once", fake_run_agent_once)
@@ -100,6 +107,8 @@ def test_agent_run_sends_heartbeat(monkeypatch) -> None:
     assert "Heartbeat accepted" in result.output
     assert "2026-06-16T10:01:00+00:00" in result.output
     assert "http://192.168.1.10:8765" in result.output
+    assert "cmd_123: completed" in result.output
+    assert "192.168.1.25" in result.output
 
 
 def test_agent_status_and_run_before_enroll(tmp_path: Path) -> None:

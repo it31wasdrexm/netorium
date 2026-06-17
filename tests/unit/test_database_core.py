@@ -24,3 +24,4 @@ def test_initialize_database_creates_schema(tmp_path: Path) -> None:
     assert "zones" in tables
     assert "devices" in tables
     assert "audit_logs" in tables
+    assert "agent_commands" in tables

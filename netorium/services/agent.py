@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import socket
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +28,7 @@ class HttpResponse(Protocol):
 
 
 class HttpClient(Protocol):
-    def post(self, url: str, json: dict[str, str], timeout: float) -> HttpResponse:
+    def post(self, url: str, json: dict[str, Any], timeout: float) -> HttpResponse:
         pass
 
 
@@ -60,6 +61,14 @@ class AgentRunResult:
     controller_url: str | None = None
     accepted_at: str | None = None
     pending_commands: tuple[dict[str, Any], ...] = ()
+    command_results: tuple["AgentCommandExecution", ...] = ()
+
+
+@dataclass(frozen=True)
+class AgentCommandExecution:
+    command_id: str
+    status: str
+    message: str
 
 
 def default_agent_state_path() -> Path:
@@ -186,16 +195,25 @@ def run_agent_once(
     payload = _read_json_object(response)
     accepted_at = _read_required_string(payload, "accepted_at")
     commands = _read_commands(payload)
+    command_results = tuple(_execute_agent_command(command) for command in commands)
+    for result in command_results:
+        _post_command_result(
+            active_client,
+            state=state,
+            result=result,
+            timeout=timeout,
+        )
 
     return AgentRunResult(
         enrolled=True,
         controller_url=state.controller_url,
         accepted_at=accepted_at,
         pending_commands=commands,
+        command_results=command_results,
         message=(
             "Heartbeat accepted; no endpoint commands are queued yet."
             if not commands
-            else f"Heartbeat accepted; {len(commands)} command(s) pending."
+            else f"Heartbeat accepted; processed {len(command_results)} endpoint command(s)."
         ),
     )
 
@@ -208,6 +226,81 @@ def service_action(action: str) -> str:
         f"Agent service {clean_action} is not installed by this MVP yet. "
         "Use `netorium-agent run` for the foreground heartbeat skeleton."
     )
+
+
+def _execute_agent_command(command: dict[str, Any]) -> AgentCommandExecution:
+    command_id = _read_command_string(command, "command_id")
+    command_type = _read_command_string(command, "command_type")
+    payload = command.get("payload")
+    if not isinstance(payload, dict):
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="failed",
+            message="Agent command payload must be an object.",
+        )
+
+    if command_type != "firewall.ip":
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="failed",
+            message=f"Unsupported agent command type: {command_type}",
+        )
+
+    try:
+        return _execute_firewall_command(command_id, payload)
+    except AgentError as exc:
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="failed",
+            message=str(exc),
+        )
+
+
+def _execute_firewall_command(command_id: str, payload: dict[str, Any]) -> AgentCommandExecution:
+    action = _read_payload_string(payload, "action")
+    if action not in {"block", "unblock"}:
+        raise AgentError("Endpoint firewall action must be block or unblock.")
+
+    ip_address = _normalize_ip_address(_read_payload_string(payload, "ip_address"))
+    reason = _normalize_text(_read_payload_string(payload, "reason"), "Firewall reason")
+    dry_run = payload.get("dry_run")
+    if dry_run is not True:
+        raise AgentError("Real endpoint firewall commands are not implemented yet.")
+
+    return AgentCommandExecution(
+        command_id=command_id,
+        status="completed",
+        message=f"Dry-run firewall {action} accepted for {ip_address}: {reason}",
+    )
+
+
+def _post_command_result(
+    client: HttpClient,
+    *,
+    state: AgentState,
+    result: AgentCommandExecution,
+    timeout: float,
+) -> None:
+    result_url = f"{state.controller_url}/command-result"
+    try:
+        response = client.post(
+            result_url,
+            json={
+                "agent_id": state.agent_id,
+                "device_token": state.device_token,
+                "command_id": result.command_id,
+                "status": result.status,
+                "message": result.message,
+            },
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        raise AgentError(f"Could not report agent command result: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise AgentError(
+            f"Controller command-result endpoint failed with HTTP {response.status_code}: {response.text}"
+        )
 
 
 def _write_state(state: AgentState) -> None:
@@ -260,6 +353,27 @@ def _read_required_string(payload: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AgentError(f"Controller enrollment response is missing `{key}`.")
     return value.strip()
+
+
+def _read_command_string(command: dict[str, Any], key: str) -> str:
+    value = command.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise AgentError(f"Controller heartbeat command is missing `{key}`.")
+    return value.strip()
+
+
+def _read_payload_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise AgentError(f"Agent command payload is missing `{key}`.")
+    return value.strip()
+
+
+def _normalize_ip_address(value: str) -> str:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError as exc:
+        raise AgentError(f"Invalid IP address: {value}") from exc
 
 
 def _read_commands(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:

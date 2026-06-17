@@ -11,12 +11,15 @@ from netorium.services.controller import (
     ControllerError,
     ControllerNotInitializedError,
     create_enrollment_token,
+    enqueue_agent_firewall_command,
     enroll_agent,
     get_controller_status,
     hash_token,
     init_controller,
+    list_agent_commands,
     list_agents,
     parse_ttl,
+    record_agent_command_result,
     record_agent_heartbeat,
 )
 
@@ -146,6 +149,85 @@ def test_agent_heartbeat_updates_last_seen_and_lists_agent(tmp_path: Path) -> No
     assert agents[0].last_seen_at == heartbeat.accepted_at
 
 
+def test_agent_command_queue_delivers_and_records_result(tmp_path: Path) -> None:
+    database_path = tmp_path / "netorium.db"
+    init_controller(database_path, host="192.168.1.10", port=8765)
+    token = create_enrollment_token(database_path, zone="accounting", ttl="24h")
+    enrollment = enroll_agent(database_path, token=token.token, hostname="pc-acc-01")
+
+    command = enqueue_agent_firewall_command(
+        database_path,
+        agent_id=enrollment.agent_id,
+        action="block",
+        ip_address="192.168.1.25",
+        reason="Policy test",
+    )
+    heartbeat = record_agent_heartbeat(
+        database_path,
+        agent_id=enrollment.agent_id,
+        device_token=enrollment.device_token,
+    )
+    delivered = list_agent_commands(database_path, agent_id=enrollment.agent_id)
+    result = record_agent_command_result(
+        database_path,
+        agent_id=enrollment.agent_id,
+        device_token=enrollment.device_token,
+        command_id=command.command_id,
+        status="completed",
+        message="Dry-run firewall block accepted.",
+    )
+    completed = list_agent_commands(database_path, agent_id=enrollment.agent_id)
+
+    assert heartbeat.pending_commands == (
+        {
+            "command_id": command.command_id,
+            "command_type": "firewall.ip",
+            "payload": {
+                "action": "block",
+                "dry_run": True,
+                "ip_address": "192.168.1.25",
+                "reason": "Policy test",
+            },
+            "created_at": command.created_at,
+        },
+    )
+    assert delivered[0].status == "delivered"
+    assert result.status == "completed"
+    assert completed[0].status == "completed"
+    assert completed[0].result_message == "Dry-run firewall block accepted."
+
+    entries = list_audit_entries(str(database_path))
+    assert "controller.agent.command.completed" in [entry.action for entry in entries]
+    assert "controller.agent.command.enqueue" in [entry.action for entry in entries]
+
+
+def test_agent_firewall_command_requires_existing_agent_and_dry_run(tmp_path: Path) -> None:
+    database_path = tmp_path / "netorium.db"
+    init_controller(database_path, host="192.168.1.10", port=8765)
+
+    with pytest.raises(ControllerError, match="Agent was not found"):
+        enqueue_agent_firewall_command(
+            database_path,
+            agent_id="agt_missing",
+            action="block",
+            ip_address="192.168.1.25",
+            reason="Policy test",
+        )
+
+    token = create_enrollment_token(database_path, zone="accounting", ttl="24h")
+    enrollment = enroll_agent(database_path, token=token.token, hostname="pc-acc-01")
+
+    with pytest.raises(ControllerError, match="Only dry-run"):
+        enqueue_agent_firewall_command(
+            database_path,
+            agent_id=enrollment.agent_id,
+            action="block",
+            ip_address="192.168.1.25",
+            reason="Policy test",
+            dry_run=False,
+        )
+
+
 def test_agent_heartbeat_rejects_invalid_device_token(tmp_path: Path) -> None:
     database_path = tmp_path / "netorium.db"
     init_controller(database_path, host="192.168.1.10", port=8765)
@@ -201,3 +283,4 @@ def test_controller_schema_tables_exist(tmp_path: Path) -> None:
     assert "controller_config" in tables
     assert "enrollment_tokens" in tables
     assert "agents" in tables
+    assert "agent_commands" in tables

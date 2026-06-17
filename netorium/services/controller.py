@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import secrets
@@ -19,6 +20,11 @@ from netorium.core.database import connect_database, initialize_database
 DEFAULT_CONTROLLER_HOST = "0.0.0.0"
 DEFAULT_CONTROLLER_PORT = 8765
 TOKEN_PURPOSE_ENROLL = "enroll"
+COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
+COMMAND_STATUS_QUEUED = "queued"
+COMMAND_STATUS_DELIVERED = "delivered"
+COMMAND_STATUS_COMPLETED = "completed"
+COMMAND_STATUS_FAILED = "failed"
 
 _TTL_PATTERN = re.compile(r"^(?P<amount>[1-9][0-9]*)(?P<unit>[mhd])$")
 
@@ -81,7 +87,29 @@ class AgentEnrollment:
 class AgentHeartbeat:
     agent_id: str
     accepted_at: str
-    pending_commands: tuple[dict[str, object], ...]
+    pending_commands: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class AgentCommandRecord:
+    command_id: str
+    agent_id: str
+    command_type: str
+    payload: dict[str, Any]
+    status: str
+    result_message: str | None
+    created_at: str
+    delivered_at: str | None
+    completed_at: str | None
+
+
+@dataclass(frozen=True)
+class AgentCommandResult:
+    command_id: str
+    agent_id: str
+    status: str
+    message: str
+    completed_at: str
 
 
 def init_controller(
@@ -212,6 +240,144 @@ def list_agents(database_path: str | Path) -> list[AgentRecord]:
         raise ControllerError(f"Could not list agents: {exc}") from exc
 
     return [_agent_record_from_row(row) for row in rows]
+
+
+def list_agent_commands(
+    database_path: str | Path,
+    *,
+    agent_id: str | None = None,
+) -> list[AgentCommandRecord]:
+    path = initialize_database(database_path)
+    clean_agent_id = _normalize_text(agent_id, "Agent ID") if agent_id is not None else None
+
+    try:
+        connection = connect_database(path)
+        try:
+            if clean_agent_id is None:
+                rows = connection.execute(
+                    """
+                    SELECT command_id, agent_id, command_type, payload, status,
+                           result_message, created_at, delivered_at, completed_at
+                    FROM agent_commands
+                    ORDER BY id DESC
+                    """
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT command_id, agent_id, command_type, payload, status,
+                           result_message, created_at, delivered_at, completed_at
+                    FROM agent_commands
+                    WHERE agent_id = ?
+                    ORDER BY id DESC
+                    """,
+                    (clean_agent_id,),
+                ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise ControllerError(f"Could not list agent commands: {exc}") from exc
+
+    return [_agent_command_from_row(row) for row in rows]
+
+
+def enqueue_agent_firewall_command(
+    database_path: str | Path,
+    *,
+    agent_id: str,
+    action: str,
+    ip_address: str,
+    reason: str,
+    dry_run: bool = True,
+) -> AgentCommandRecord:
+    clean_agent_id = _normalize_text(agent_id, "Agent ID")
+    clean_action = _normalize_firewall_action(action)
+    clean_ip = _normalize_ip_address(ip_address)
+    clean_reason = _normalize_text(reason, "Firewall reason")
+    if not dry_run:
+        raise ControllerError("Only dry-run endpoint firewall commands are supported in this checkpoint.")
+
+    payload: dict[str, Any] = {
+        "action": clean_action,
+        "ip_address": clean_ip,
+        "reason": clean_reason,
+        "dry_run": True,
+    }
+    path = initialize_database(database_path)
+    timestamp = _utc_timestamp()
+
+    for _ in range(3):
+        command_id = f"cmd_{secrets.token_hex(6)}"
+        try:
+            connection = connect_database(path)
+            try:
+                with connection:
+                    agent_row = connection.execute(
+                        """
+                        SELECT agent_id
+                        FROM agents
+                        WHERE agent_id = ?
+                        """,
+                        (clean_agent_id,),
+                    ).fetchone()
+                    if agent_row is None:
+                        raise ControllerError(f"Agent was not found: {clean_agent_id}")
+
+                    connection.execute(
+                        """
+                        INSERT INTO agent_commands(
+                            command_id,
+                            agent_id,
+                            command_type,
+                            payload,
+                            status,
+                            created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            command_id,
+                            clean_agent_id,
+                            COMMAND_TYPE_FIREWALL_IP,
+                            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                            COMMAND_STATUS_QUEUED,
+                            timestamp,
+                        ),
+                    )
+                    write_audit_entry(
+                        connection,
+                        action="controller.agent.command.enqueue",
+                        entity_type="agent_command",
+                        entity_id=command_id,
+                        details={
+                            "agent_id": clean_agent_id,
+                            "command_type": COMMAND_TYPE_FIREWALL_IP,
+                            "action": clean_action,
+                            "ip_address": clean_ip,
+                            "dry_run": True,
+                        },
+                        created_at=timestamp,
+                    )
+            finally:
+                connection.close()
+        except sqlite3.IntegrityError:
+            continue
+        except sqlite3.Error as exc:
+            raise ControllerError(f"Could not queue agent command: {exc}") from exc
+
+        return AgentCommandRecord(
+            command_id=command_id,
+            agent_id=clean_agent_id,
+            command_type=COMMAND_TYPE_FIREWALL_IP,
+            payload=payload,
+            status=COMMAND_STATUS_QUEUED,
+            result_message=None,
+            created_at=timestamp,
+            delivered_at=None,
+            completed_at=None,
+        )
+
+    raise ControllerError("Could not create a unique agent command.")
 
 
 def create_enrollment_token(
@@ -405,6 +571,32 @@ def record_agent_heartbeat(
                 )
                 if cursor.rowcount != 1:
                     raise ControllerError("Agent heartbeat was rejected.")
+                command_rows = connection.execute(
+                    """
+                    SELECT command_id, agent_id, command_type, payload, status,
+                           result_message, created_at, delivered_at, completed_at
+                    FROM agent_commands
+                    WHERE agent_id = ?
+                      AND status = ?
+                    ORDER BY id ASC
+                    """,
+                    (clean_agent_id, COMMAND_STATUS_QUEUED),
+                ).fetchall()
+                for row in command_rows:
+                    connection.execute(
+                        """
+                        UPDATE agent_commands
+                        SET status = ?, delivered_at = ?
+                        WHERE command_id = ?
+                          AND status = ?
+                        """,
+                        (
+                            COMMAND_STATUS_DELIVERED,
+                            timestamp,
+                            str(row["command_id"]),
+                            COMMAND_STATUS_QUEUED,
+                        ),
+                    )
         finally:
             connection.close()
     except sqlite3.Error as exc:
@@ -413,7 +605,85 @@ def record_agent_heartbeat(
     return AgentHeartbeat(
         agent_id=clean_agent_id,
         accepted_at=timestamp,
-        pending_commands=(),
+        pending_commands=tuple(_agent_command_payload_from_row(row) for row in command_rows),
+    )
+
+
+def record_agent_command_result(
+    database_path: str | Path,
+    *,
+    agent_id: str,
+    device_token: str,
+    command_id: str,
+    status: str,
+    message: str,
+) -> AgentCommandResult:
+    clean_agent_id = _normalize_text(agent_id, "Agent ID")
+    clean_command_id = _normalize_text(command_id, "Command ID")
+    clean_status = _normalize_command_result_status(status)
+    clean_message = _normalize_text(message, "Command result message")
+    device_token_hash = hash_token(device_token)
+    timestamp = _utc_timestamp()
+    path = initialize_database(database_path)
+
+    try:
+        connection = connect_database(path)
+        try:
+            with connection:
+                agent_row = connection.execute(
+                    """
+                    SELECT agent_id
+                    FROM agents
+                    WHERE agent_id = ?
+                      AND device_token_hash = ?
+                    """,
+                    (clean_agent_id, device_token_hash),
+                ).fetchone()
+                if agent_row is None:
+                    raise ControllerError("Agent command result was rejected.")
+
+                command_row = connection.execute(
+                    """
+                    SELECT command_id
+                    FROM agent_commands
+                    WHERE command_id = ?
+                      AND agent_id = ?
+                    """,
+                    (clean_command_id, clean_agent_id),
+                ).fetchone()
+                if command_row is None:
+                    raise ControllerError(f"Agent command was not found: {clean_command_id}")
+
+                connection.execute(
+                    """
+                    UPDATE agent_commands
+                    SET status = ?, result_message = ?, completed_at = ?
+                    WHERE command_id = ?
+                    """,
+                    (clean_status, clean_message, timestamp, clean_command_id),
+                )
+                write_audit_entry(
+                    connection,
+                    action=f"controller.agent.command.{clean_status}",
+                    entity_type="agent_command",
+                    entity_id=clean_command_id,
+                    details={
+                        "agent_id": clean_agent_id,
+                        "status": clean_status,
+                    },
+                    created_at=timestamp,
+                )
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise ControllerError(f"Could not record agent command result: {exc}") from exc
+
+    return AgentCommandResult(
+        command_id=clean_command_id,
+        agent_id=clean_agent_id,
+        status=clean_status,
+        message=clean_message,
+        completed_at=timestamp,
     )
 
 
@@ -555,6 +825,58 @@ def _make_handler(database_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            if parsed.path == "/command-result":
+                payload = self._read_json()
+                if not isinstance(payload, dict):
+                    self._send_json({"error": "invalid json"}, status_code=400)
+                    return
+
+                agent_id = payload.get("agent_id")
+                device_token = payload.get("device_token")
+                command_id = payload.get("command_id")
+                status = payload.get("status")
+                message = payload.get("message")
+                if (
+                    not isinstance(agent_id, str)
+                    or not isinstance(device_token, str)
+                    or not isinstance(command_id, str)
+                    or not isinstance(status, str)
+                    or not isinstance(message, str)
+                ):
+                    self._send_json(
+                        {
+                            "error": (
+                                "agent_id, device_token, command_id, status, "
+                                "and message are required"
+                            )
+                        },
+                        status_code=400,
+                    )
+                    return
+
+                try:
+                    result = record_agent_command_result(
+                        database_path,
+                        agent_id=agent_id,
+                        device_token=device_token,
+                        command_id=command_id,
+                        status=status,
+                        message=message,
+                    )
+                except ControllerError as exc:
+                    self._send_json({"error": str(exc)}, status_code=403)
+                    return
+
+                self._send_json(
+                    {
+                        "agent_id": result.agent_id,
+                        "command_id": result.command_id,
+                        "status": result.status,
+                        "completed_at": result.completed_at,
+                    }
+                )
+                return
+
             self._send_json({"error": "not found"}, status_code=404)
 
         def log_message(self, format: str, *args: Any) -> None:
@@ -615,6 +937,63 @@ def _agent_record_from_row(row: sqlite3.Row) -> AgentRecord:
         enrolled_at=str(row["enrolled_at"]),
         last_seen_at=str(raw_last_seen) if raw_last_seen is not None else None,
     )
+
+
+def _agent_command_from_row(row: sqlite3.Row) -> AgentCommandRecord:
+    raw_result_message = row["result_message"]
+    raw_delivered_at = row["delivered_at"]
+    raw_completed_at = row["completed_at"]
+    return AgentCommandRecord(
+        command_id=str(row["command_id"]),
+        agent_id=str(row["agent_id"]),
+        command_type=str(row["command_type"]),
+        payload=_decode_payload(str(row["payload"])),
+        status=str(row["status"]),
+        result_message=str(raw_result_message) if raw_result_message is not None else None,
+        created_at=str(row["created_at"]),
+        delivered_at=str(raw_delivered_at) if raw_delivered_at is not None else None,
+        completed_at=str(raw_completed_at) if raw_completed_at is not None else None,
+    )
+
+
+def _agent_command_payload_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "command_id": str(row["command_id"]),
+        "command_type": str(row["command_type"]),
+        "payload": _decode_payload(str(row["payload"])),
+        "created_at": str(row["created_at"]),
+    }
+
+
+def _decode_payload(value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _normalize_firewall_action(value: str) -> str:
+    clean_value = value.strip().lower()
+    if clean_value not in {"block", "unblock"}:
+        raise ControllerError("Endpoint firewall action must be block or unblock.")
+    return clean_value
+
+
+def _normalize_ip_address(value: str) -> str:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError as exc:
+        raise ControllerError(f"Invalid IP address: {value}") from exc
+
+
+def _normalize_command_result_status(value: str) -> str:
+    clean_value = value.strip().lower()
+    if clean_value not in {COMMAND_STATUS_COMPLETED, COMMAND_STATUS_FAILED}:
+        raise ControllerError("Command result status must be completed or failed.")
+    return clean_value
 
 
 def _normalize_host(host: str) -> str:

@@ -39,15 +39,27 @@ class FakeClient:
     ) -> None:
         self.response = response
         self.error = error
-        self.requests: list[tuple[str, dict[str, str]]] = []
+        self.requests: list[tuple[str, dict[str, Any]]] = []
 
-    def post(self, url: str, json: dict[str, str], timeout: float) -> FakeResponse:
+    def post(self, url: str, json: dict[str, Any], timeout: float) -> FakeResponse:
         self.requests.append((url, json))
         if self.error is not None:
             raise self.error
         if self.response is None:
             raise AssertionError("Fake response was not configured")
         return self.response
+
+
+class SequenceClient:
+    def __init__(self, responses: list[FakeResponse]) -> None:
+        self.responses = responses
+        self.requests: list[tuple[str, dict[str, Any]]] = []
+
+    def post(self, url: str, json: dict[str, Any], timeout: float) -> FakeResponse:
+        self.requests.append((url, json))
+        if not self.responses:
+            raise AssertionError("No fake responses left")
+        return self.responses.pop(0)
 
 
 def test_agent_enroll_writes_local_state_without_printing_raw_enrollment_token(
@@ -170,6 +182,135 @@ def test_run_agent_once_sends_heartbeat_without_printing_device_token(tmp_path: 
             {"agent_id": "agt_123", "device_token": "ng_device_secret"},
         )
     ]
+
+
+def test_run_agent_once_processes_dry_run_firewall_command(tmp_path: Path) -> None:
+    state_path = tmp_path / "agent.json"
+    enroll_agent(
+        controller_url="http://192.168.1.10:8765",
+        token="ng_enroll_secret",
+        hostname="pc-acc-01",
+        state_path=state_path,
+        client=FakeClient(
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "device_token": "ng_device_secret",
+                    "hostname": "pc-acc-01",
+                    "zone": "accounting",
+                    "enrolled_at": "2026-06-16T10:00:00+00:00",
+                },
+            )
+        ),
+    )
+    client = SequenceClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "accepted_at": "2026-06-16T10:01:00+00:00",
+                    "commands": [
+                        {
+                            "command_id": "cmd_123",
+                            "command_type": "firewall.ip",
+                            "payload": {
+                                "action": "block",
+                                "dry_run": True,
+                                "ip_address": "192.168.1.25",
+                                "reason": "Policy test",
+                            },
+                            "created_at": "2026-06-16T10:00:30+00:00",
+                        }
+                    ],
+                },
+            ),
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "command_id": "cmd_123",
+                    "status": "completed",
+                    "completed_at": "2026-06-16T10:01:01+00:00",
+                },
+            ),
+        ]
+    )
+
+    result = run_agent_once(state_path, client=client)
+
+    assert result.message == "Heartbeat accepted; processed 1 endpoint command(s)."
+    assert result.command_results[0].command_id == "cmd_123"
+    assert result.command_results[0].status == "completed"
+    assert "Dry-run firewall block accepted" in result.command_results[0].message
+    assert client.requests == [
+        (
+            "http://192.168.1.10:8765/heartbeat",
+            {"agent_id": "agt_123", "device_token": "ng_device_secret"},
+        ),
+        (
+            "http://192.168.1.10:8765/command-result",
+            {
+                "agent_id": "agt_123",
+                "device_token": "ng_device_secret",
+                "command_id": "cmd_123",
+                "status": "completed",
+                "message": "Dry-run firewall block accepted for 192.168.1.25: Policy test",
+            },
+        ),
+    ]
+
+
+def test_run_agent_once_rejects_real_firewall_command(tmp_path: Path) -> None:
+    state_path = tmp_path / "agent.json"
+    enroll_agent(
+        controller_url="http://192.168.1.10:8765",
+        token="ng_enroll_secret",
+        hostname="pc-acc-01",
+        state_path=state_path,
+        client=FakeClient(
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "device_token": "ng_device_secret",
+                    "hostname": "pc-acc-01",
+                    "zone": "accounting",
+                    "enrolled_at": "2026-06-16T10:00:00+00:00",
+                },
+            )
+        ),
+    )
+    client = SequenceClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "accepted_at": "2026-06-16T10:01:00+00:00",
+                    "commands": [
+                        {
+                            "command_id": "cmd_123",
+                            "command_type": "firewall.ip",
+                            "payload": {
+                                "action": "block",
+                                "dry_run": False,
+                                "ip_address": "192.168.1.25",
+                                "reason": "Policy test",
+                            },
+                        }
+                    ],
+                },
+            ),
+            FakeResponse(200, {"status": "failed"}),
+        ]
+    )
+
+    result = run_agent_once(state_path, client=client)
+
+    assert result.command_results[0].status == "failed"
+    assert result.command_results[0].message == "Real endpoint firewall commands are not implemented yet."
 
 
 def test_service_action_is_placeholder_for_mvp() -> None:

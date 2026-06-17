@@ -90,6 +90,52 @@ def test_controller_agent_list_shows_enrolled_agents(tmp_path: Path) -> None:
     assert "accounting" in result.output
 
 
+def test_controller_agent_command_firewall_and_list(tmp_path: Path) -> None:
+    env = _write_config(tmp_path)
+    database_path = tmp_path / "state" / "netorium.db"
+    runner.invoke(
+        app,
+        ["controller", "init", "--host", "192.168.1.10", "--port", "8765"],
+        env=env,
+    )
+    token = create_enrollment_token(database_path, zone="accounting", ttl="24h")
+    enrollment = enroll_agent(database_path, token=token.token, hostname="pc-acc-01")
+
+    queue_result = runner.invoke(
+        app,
+        [
+            "controller",
+            "agent",
+            "command",
+            "firewall",
+            "--agent-id",
+            enrollment.agent_id,
+            "--action",
+            "block",
+            "--ip",
+            "192.168.1.25",
+            "--reason",
+            "Policy test",
+        ],
+        env=env,
+    )
+    list_result = runner.invoke(
+        app,
+        ["controller", "agent", "command", "list", "--agent-id", enrollment.agent_id],
+        env=env,
+    )
+
+    assert queue_result.exit_code == 0
+    assert "Endpoint command queued." in queue_result.output
+    assert "firewall.ip" in queue_result.output
+    assert "queued" in queue_result.output
+    assert "192.168.1.25" in queue_result.output
+    assert list_result.exit_code == 0
+    assert "Agent Commands" in list_result.output
+    assert "cmd_" in list_result.output
+    assert "queued" in list_result.output
+
+
 def _write_config(tmp_path: Path) -> dict[str, str]:
     database_path = tmp_path / "state" / "netorium.db"
     config_dir = isolated_config_dir(tmp_path)

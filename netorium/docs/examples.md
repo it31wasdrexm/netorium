@@ -78,6 +78,16 @@ netorium-agent status
 netorium-agent run
 ```
 
+Queue a dry-run firewall command for an enrolled endpoint and inspect the
+result after the agent runs:
+
+```bash
+netorium controller agent list
+netorium controller agent command firewall --agent-id AGENT_ID --action block --ip 192.168.1.25 --reason "Policy test"
+netorium-agent run
+netorium controller agent command list --agent-id AGENT_ID
+```
+
 Run Netorium through Docker:
 
 ```bash

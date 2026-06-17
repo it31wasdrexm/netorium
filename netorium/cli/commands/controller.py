@@ -16,8 +16,10 @@ from netorium.services.controller import (
     ControllerError,
     build_enrollment_url,
     create_enrollment_token,
+    enqueue_agent_firewall_command,
     get_controller_status,
     init_controller,
+    list_agent_commands,
     list_agents,
     serve_controller,
 )
@@ -34,6 +36,11 @@ token_app = typer.Typer(
 )
 agent_app = typer.Typer(
     help="Inspect enrolled endpoint agents.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+agent_command_app = typer.Typer(
+    help="Queue and inspect endpoint agent commands.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -182,6 +189,88 @@ def agent_list() -> None:
     console.print(table)
 
 
+@agent_command_app.command("firewall")
+def agent_command_firewall(
+    agent_id: Annotated[str, typer.Option("--agent-id", help="Target endpoint agent ID.")],
+    action: Annotated[
+        str,
+        typer.Option("--action", help="Endpoint firewall action: block or unblock."),
+    ],
+    ip_address: Annotated[
+        str,
+        typer.Option("--ip", help="Target IP address for the endpoint firewall command."),
+    ],
+    reason: Annotated[str, typer.Option("--reason", help="Required audit reason.")],
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--real",
+            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+        ),
+    ] = True,
+) -> None:
+    """Queue a dry-run endpoint firewall command for an enrolled agent."""
+    try:
+        command = enqueue_agent_firewall_command(
+            _database_path(),
+            agent_id=agent_id,
+            action=action,
+            ip_address=ip_address,
+            reason=reason,
+            dry_run=dry_run,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    console.print("Endpoint command queued.")
+    table = Table(title="Agent Command")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Command ID", command.command_id)
+    table.add_row("Agent ID", command.agent_id)
+    table.add_row("Type", command.command_type)
+    table.add_row("Status", command.status)
+    table.add_row("Payload", _payload_summary(command.payload))
+    console.print(table)
+
+
+@agent_command_app.command("list")
+def agent_command_list(
+    agent_id: Annotated[
+        str | None,
+        typer.Option("--agent-id", help="Only show commands for this endpoint agent."),
+    ] = None,
+) -> None:
+    """List queued and completed endpoint agent commands."""
+    try:
+        commands = list_agent_commands(_database_path(), agent_id=agent_id)
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    if not commands:
+        console.print("No agent commands")
+        return
+
+    table = Table(title="Agent Commands")
+    table.add_column("Command ID")
+    table.add_column("Agent ID")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Payload")
+    table.add_column("Result")
+    for command in commands:
+        table.add_row(
+            command.command_id,
+            command.agent_id,
+            command.command_type,
+            command.status,
+            _payload_summary(command.payload),
+            command.result_message or "-",
+        )
+    console.print(table)
+
+
+agent_app.add_typer(agent_command_app, name="command")
 controller_app.add_typer(token_app, name="token")
 controller_app.add_typer(agent_app, name="agent")
 
@@ -204,6 +293,13 @@ def _render_config(
     table.add_row("Enrollment URL", enrollment_url or "-")
     table.add_row("Active enrollment tokens", str(active_tokens))
     console.print(table)
+
+
+def _payload_summary(payload: dict[str, object]) -> str:
+    action = payload.get("action", "-")
+    ip_address = payload.get("ip_address", "-")
+    dry_run = payload.get("dry_run", "-")
+    return f"{action} {ip_address} dry-run={dry_run}"
 
 
 def _fail(exc: Exception) -> None:

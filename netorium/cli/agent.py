@@ -111,6 +111,8 @@ def run() -> None:
         console.print(f"Heartbeat: {result.accepted_at}")
     if result.controller_url is not None:
         console.print(f"Controller: {result.controller_url}")
+    for command_result in result.command_results:
+        console.print(f"{command_result.command_id}: {command_result.status} - {command_result.message}")
 
 
 @service_app.command("install")

@@ -240,8 +240,18 @@ netorium-agent run
 ```
 
 The current agent stores endpoint state locally, does not print enrollment or
-device tokens, and sends heartbeat checks to the controller. Endpoint firewall
-application, command signing, and rollback are the next deployment phase.
+device tokens, and sends heartbeat checks to the controller. The controller can
+queue dry-run endpoint firewall commands, and `netorium-agent run` reports the
+completed or failed result back to the controller:
+
+```bash
+netorium controller agent command firewall --agent-id AGENT_ID --action block --ip 192.168.1.25 --reason "Policy test"
+netorium-agent run
+netorium controller agent command list --agent-id AGENT_ID
+```
+
+Real endpoint firewall application, command signing, and rollback are the next
+deployment phase.
 
 ## Local Checkout
 

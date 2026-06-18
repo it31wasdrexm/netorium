@@ -11,8 +11,13 @@ from urllib.parse import urlparse
 import requests
 
 from netorium.core.platform import user_config_path
+from netorium.services.command_signing import hash_shared_secret, verify_agent_command_signature
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
+COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
+COMMAND_TYPE_SITE_ACCESS = "network.site"
+COMMAND_TYPE_APP_ACCESS = "network.app"
+COMMAND_TYPE_SPEED_LIMIT = "network.speed"
 
 
 class AgentError(RuntimeError):
@@ -195,7 +200,7 @@ def run_agent_once(
     payload = _read_json_object(response)
     accepted_at = _read_required_string(payload, "accepted_at")
     commands = _read_commands(payload)
-    command_results = tuple(_execute_agent_command(command) for command in commands)
+    command_results = tuple(_execute_agent_command(state, command) for command in commands)
     for result in command_results:
         _post_command_result(
             active_client,
@@ -228,9 +233,10 @@ def service_action(action: str) -> str:
     )
 
 
-def _execute_agent_command(command: dict[str, Any]) -> AgentCommandExecution:
+def _execute_agent_command(state: AgentState, command: dict[str, Any]) -> AgentCommandExecution:
     command_id = _read_command_string(command, "command_id")
     command_type = _read_command_string(command, "command_type")
+    created_at = _read_command_string(command, "created_at")
     payload = command.get("payload")
     if not isinstance(payload, dict):
         return AgentCommandExecution(
@@ -238,22 +244,49 @@ def _execute_agent_command(command: dict[str, Any]) -> AgentCommandExecution:
             status="failed",
             message="Agent command payload must be an object.",
         )
-
-    if command_type != "firewall.ip":
+    signature = command.get("signature")
+    if not isinstance(signature, str) or not signature.strip():
         return AgentCommandExecution(
             command_id=command_id,
             status="failed",
-            message=f"Unsupported agent command type: {command_type}",
+            message="Agent command signature is missing.",
+        )
+
+    if not _verify_agent_command_signature(
+        state=state,
+        command_id=command_id,
+        command_type=command_type,
+        payload=payload,
+        created_at=created_at,
+        signature=signature,
+    ):
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="failed",
+            message="Agent command signature is invalid.",
         )
 
     try:
-        return _execute_firewall_command(command_id, payload)
+        if command_type == COMMAND_TYPE_FIREWALL_IP:
+            return _execute_firewall_command(command_id, payload)
+        if command_type == COMMAND_TYPE_SITE_ACCESS:
+            return _execute_site_command(command_id, payload)
+        if command_type == COMMAND_TYPE_APP_ACCESS:
+            return _execute_app_command(command_id, payload)
+        if command_type == COMMAND_TYPE_SPEED_LIMIT:
+            return _execute_speed_command(command_id, payload)
     except AgentError as exc:
         return AgentCommandExecution(
             command_id=command_id,
             status="failed",
             message=str(exc),
         )
+
+    return AgentCommandExecution(
+        command_id=command_id,
+        status="failed",
+        message=f"Unsupported agent command type: {command_type}",
+    )
 
 
 def _execute_firewall_command(command_id: str, payload: dict[str, Any]) -> AgentCommandExecution:
@@ -271,6 +304,88 @@ def _execute_firewall_command(command_id: str, payload: dict[str, Any]) -> Agent
         command_id=command_id,
         status="completed",
         message=f"Dry-run firewall {action} accepted for {ip_address}: {reason}",
+    )
+
+
+def _execute_site_command(command_id: str, payload: dict[str, Any]) -> AgentCommandExecution:
+    action = _read_policy_action(payload, "Site policy action")
+    domain = _normalize_domain(_read_payload_string(payload, "domain"))
+    reason = _normalize_text(_read_payload_string(payload, "reason"), "Site policy reason")
+    _require_dry_run(payload)
+
+    return AgentCommandExecution(
+        command_id=command_id,
+        status="completed",
+        message=f"Dry-run site {action} accepted for {domain}: {reason}",
+    )
+
+
+def _execute_app_command(command_id: str, payload: dict[str, Any]) -> AgentCommandExecution:
+    action = _read_policy_action(payload, "Application network action")
+    executable = _normalize_executable(_read_payload_string(payload, "executable"))
+    reason = _normalize_text(_read_payload_string(payload, "reason"), "Application network reason")
+    _require_dry_run(payload)
+
+    return AgentCommandExecution(
+        command_id=command_id,
+        status="completed",
+        message=f"Dry-run app {action} accepted for {executable}: {reason}",
+    )
+
+
+def _execute_speed_command(command_id: str, payload: dict[str, Any]) -> AgentCommandExecution:
+    action = _read_payload_string(payload, "action").lower()
+    reason = _normalize_text(_read_payload_string(payload, "reason"), "Speed policy reason")
+    _require_dry_run(payload)
+
+    if action == "clear":
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="completed",
+            message=f"Dry-run speed limit clear accepted: {reason}",
+        )
+
+    if action != "limit":
+        raise AgentError("Speed policy action must be limit or clear.")
+
+    download_kbps = _read_optional_kbps(payload, "download_kbps", "Download speed")
+    upload_kbps = _read_optional_kbps(payload, "upload_kbps", "Upload speed")
+    if download_kbps is None and upload_kbps is None:
+        raise AgentError("Speed limit requires download_kbps or upload_kbps.")
+
+    return AgentCommandExecution(
+        command_id=command_id,
+        status="completed",
+        message=(
+            "Dry-run speed limit accepted "
+            f"download={_format_optional_kbps(download_kbps)} "
+            f"upload={_format_optional_kbps(upload_kbps)}: {reason}"
+        ),
+    )
+
+
+def _verify_agent_command_signature(
+    *,
+    state: AgentState,
+    command_id: str,
+    command_type: str,
+    payload: dict[str, Any],
+    created_at: str,
+    signature: str,
+) -> bool:
+    try:
+        signing_key = hash_shared_secret(state.device_token, label="Device token")
+    except ValueError as exc:
+        raise AgentError(str(exc)) from exc
+
+    return verify_agent_command_signature(
+        signing_key=signing_key,
+        agent_id=state.agent_id,
+        command_id=command_id,
+        command_type=command_type,
+        payload=payload,
+        created_at=created_at,
+        signature=signature,
     )
 
 
@@ -369,11 +484,69 @@ def _read_payload_string(payload: dict[str, Any], key: str) -> str:
     return value.strip()
 
 
+def _read_policy_action(payload: dict[str, Any], label: str) -> str:
+    action = _read_payload_string(payload, "action").lower()
+    if action not in {"block", "unblock"}:
+        raise AgentError(f"{label} must be block or unblock.")
+    return action
+
+
+def _require_dry_run(payload: dict[str, Any]) -> None:
+    if payload.get("dry_run") is not True:
+        raise AgentError("Real endpoint policy commands are not implemented yet.")
+
+
 def _normalize_ip_address(value: str) -> str:
     try:
         return str(ipaddress.ip_address(value.strip()))
     except ValueError as exc:
         raise AgentError(f"Invalid IP address: {value}") from exc
+
+
+def _normalize_domain(value: str) -> str:
+    raw_value = value.strip().lower()
+    wildcard = raw_value.startswith("*.")
+    parsed = urlparse(raw_value[2:] if wildcard and "://" not in raw_value else raw_value)
+    if not parsed.netloc:
+        parsed = urlparse(f"//{raw_value[2:] if wildcard else raw_value}")
+    host = parsed.hostname or value.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    host = host.strip().lower().rstrip(".")
+    if host.startswith("*."):
+        wildcard = True
+        host = host[2:]
+    if not host or any(char.isspace() for char in host):
+        raise AgentError(f"Invalid site domain: {value}")
+    return f"*.{host}" if wildcard else host
+
+
+def _normalize_executable(value: str) -> str:
+    clean_value = _normalize_text(value, "Executable").strip("'\"").strip()
+    if not clean_value:
+        raise AgentError("Executable cannot be empty.")
+    if "\x00" in clean_value or any(char in clean_value for char in "\r\n"):
+        raise AgentError("Executable cannot contain control characters.")
+    return clean_value
+
+
+def _read_optional_kbps(
+    payload: dict[str, Any],
+    key: str,
+    label: str,
+) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise AgentError(f"{label} must be an integer kbps value.")
+    if value < 1:
+        raise AgentError(f"{label} must be at least 1 kbps.")
+    return value
+
+
+def _format_optional_kbps(value: int | None) -> str:
+    if value is None:
+        return "unlimited"
+    return f"{value}kbps"
 
 
 def _read_commands(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:

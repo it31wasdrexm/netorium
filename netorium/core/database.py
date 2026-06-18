@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Final
 
-SCHEMA_VERSION: Final[int] = 5
+SCHEMA_VERSION: Final[int] = 6
 
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS agent_commands (
     agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
     command_type TEXT NOT NULL,
     payload TEXT NOT NULL DEFAULT '{}',
+    signature TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL,
     result_message TEXT,
     created_at TEXT NOT NULL,
@@ -118,6 +119,12 @@ def initialize_database(path: str | Path) -> Path:
         try:
             with connection:
                 connection.executescript(SCHEMA_SQL)
+                _ensure_column(
+                    connection,
+                    table_name="agent_commands",
+                    column_name="signature",
+                    definition="TEXT NOT NULL DEFAULT ''",
+                )
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO schema_migrations(version, applied_at)
@@ -133,3 +140,18 @@ def initialize_database(path: str | Path) -> Path:
         raise DatabaseError(f"Could not initialize database {database_path}: {exc}") from exc
 
     return database_path
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    columns = {
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")

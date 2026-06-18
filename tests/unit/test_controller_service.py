@@ -7,11 +7,15 @@ import pytest
 
 from netorium.core.audit import list_audit_entries
 from netorium.core.database import connect_database
+from netorium.services.command_signing import verify_agent_command_signature
 from netorium.services.controller import (
     ControllerError,
     ControllerNotInitializedError,
+    enqueue_agent_app_command,
     create_enrollment_token,
     enqueue_agent_firewall_command,
+    enqueue_agent_site_command,
+    enqueue_agent_speed_command,
     enroll_agent,
     get_controller_status,
     hash_token,
@@ -188,10 +192,22 @@ def test_agent_command_queue_delivers_and_records_result(tmp_path: Path) -> None
                 "ip_address": "192.168.1.25",
                 "reason": "Policy test",
             },
+            "signature": command.signature,
             "created_at": command.created_at,
         },
     )
+    assert len(command.signature) == 64
+    assert verify_agent_command_signature(
+        signing_key=hash_token(enrollment.device_token),
+        agent_id=enrollment.agent_id,
+        command_id=command.command_id,
+        command_type=command.command_type,
+        payload=command.payload,
+        created_at=command.created_at,
+        signature=command.signature,
+    )
     assert delivered[0].status == "delivered"
+    assert delivered[0].signature == command.signature
     assert result.status == "completed"
     assert completed[0].status == "completed"
     assert completed[0].result_message == "Dry-run firewall block accepted."
@@ -199,6 +215,96 @@ def test_agent_command_queue_delivers_and_records_result(tmp_path: Path) -> None
     entries = list_audit_entries(str(database_path))
     assert "controller.agent.command.completed" in [entry.action for entry in entries]
     assert "controller.agent.command.enqueue" in [entry.action for entry in entries]
+
+
+def test_agent_policy_commands_queue_site_app_and_speed_limits(tmp_path: Path) -> None:
+    database_path = tmp_path / "netorium.db"
+    init_controller(database_path, host="192.168.1.10", port=8765)
+    token = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    enrollment = enroll_agent(database_path, token=token.token, hostname="pc-game-01")
+
+    site = enqueue_agent_site_command(
+        database_path,
+        agent_id=enrollment.agent_id,
+        action="block",
+        domain="https://YouTube.com/watch?v=abc",
+        reason="Class policy",
+    )
+    app = enqueue_agent_app_command(
+        database_path,
+        agent_id=enrollment.agent_id,
+        action="block",
+        executable="dota2.exe",
+        reason="No game traffic",
+    )
+    speed = enqueue_agent_speed_command(
+        database_path,
+        agent_id=enrollment.agent_id,
+        download_kbps=2048,
+        upload_kbps=512,
+        reason="Temporary limit",
+    )
+    heartbeat = record_agent_heartbeat(
+        database_path,
+        agent_id=enrollment.agent_id,
+        device_token=enrollment.device_token,
+    )
+
+    assert site.command_type == "network.site"
+    assert site.payload["domain"] == "youtube.com"
+    assert app.command_type == "network.app"
+    assert app.payload["executable"] == "dota2.exe"
+    assert speed.command_type == "network.speed"
+    assert speed.payload["download_kbps"] == 2048
+    assert speed.payload["upload_kbps"] == 512
+    assert [command["command_type"] for command in heartbeat.pending_commands] == [
+        "network.site",
+        "network.app",
+        "network.speed",
+    ]
+    assert all(command["signature"] for command in heartbeat.pending_commands)
+
+    commands = list_agent_commands(database_path, agent_id=enrollment.agent_id)
+    assert {command.status for command in commands} == {"delivered"}
+    assert {command.command_type for command in commands} == {
+        "network.site",
+        "network.app",
+        "network.speed",
+    }
+
+
+def test_agent_policy_commands_validate_targets_and_limits(tmp_path: Path) -> None:
+    database_path = tmp_path / "netorium.db"
+    init_controller(database_path, host="192.168.1.10", port=8765)
+    token = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    enrollment = enroll_agent(database_path, token=token.token, hostname="pc-game-01")
+
+    with pytest.raises(ControllerError, match="domain name"):
+        enqueue_agent_site_command(
+            database_path,
+            agent_id=enrollment.agent_id,
+            action="block",
+            domain="192.168.1.25",
+            reason="Wrong target",
+        )
+
+    with pytest.raises(ControllerError, match="Executable cannot be empty"):
+        enqueue_agent_app_command(
+            database_path,
+            agent_id=enrollment.agent_id,
+            action="block",
+            executable='""',
+            reason="Wrong target",
+        )
+
+    with pytest.raises(ControllerError, match="requires --download-kbps"):
+        enqueue_agent_speed_command(
+            database_path,
+            agent_id=enrollment.agent_id,
+            download_kbps=None,
+            upload_kbps=None,
+            reason="Missing limit",
+        )
 
 
 def test_agent_firewall_command_requires_existing_agent_and_dry_run(tmp_path: Path) -> None:
@@ -284,3 +390,41 @@ def test_controller_schema_tables_exist(tmp_path: Path) -> None:
     assert "enrollment_tokens" in tables
     assert "agents" in tables
     assert "agent_commands" in tables
+
+
+def test_controller_migrates_existing_agent_command_signature_column(tmp_path: Path) -> None:
+    database_path = tmp_path / "netorium.db"
+    connection = connect_database(database_path)
+    try:
+        with connection:
+            connection.execute(
+                """
+                CREATE TABLE agent_commands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command_id TEXT NOT NULL UNIQUE,
+                    agent_id TEXT NOT NULL,
+                    command_type TEXT NOT NULL,
+                    payload TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL,
+                    result_message TEXT,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT,
+                    completed_at TEXT
+                )
+                """
+            )
+    finally:
+        connection.close()
+
+    get_controller_status(database_path)
+
+    connection = connect_database(database_path)
+    try:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(agent_commands)").fetchall()
+        }
+    finally:
+        connection.close()
+
+    assert "signature" in columns

@@ -10,13 +10,17 @@ from rich.table import Table
 from netorium.core.database import DatabaseError
 from netorium.core.settings import ConfigError, load_settings
 from netorium.services.controller import (
+    AgentCommandRecord,
     DEFAULT_CONTROLLER_HOST,
     DEFAULT_CONTROLLER_PORT,
     TOKEN_PURPOSE_ENROLL,
     ControllerError,
     build_enrollment_url,
     create_enrollment_token,
+    enqueue_agent_app_command,
     enqueue_agent_firewall_command,
+    enqueue_agent_site_command,
+    enqueue_agent_speed_command,
     get_controller_status,
     init_controller,
     list_agent_commands,
@@ -222,16 +226,121 @@ def agent_command_firewall(
     except (ConfigError, DatabaseError, ControllerError) as exc:
         _fail(exc)
 
-    console.print("Endpoint command queued.")
-    table = Table(title="Agent Command")
-    table.add_column("Field")
-    table.add_column("Value")
-    table.add_row("Command ID", command.command_id)
-    table.add_row("Agent ID", command.agent_id)
-    table.add_row("Type", command.command_type)
-    table.add_row("Status", command.status)
-    table.add_row("Payload", _payload_summary(command.payload))
-    console.print(table)
+    _render_agent_command(command)
+
+
+@agent_command_app.command("site")
+def agent_command_site(
+    agent_id: Annotated[str, typer.Option("--agent-id", help="Target endpoint agent ID.")],
+    action: Annotated[
+        str,
+        typer.Option("--action", help="Site access action: block or unblock."),
+    ],
+    domain: Annotated[
+        str,
+        typer.Option("--domain", help="Domain or URL to block or unblock."),
+    ],
+    reason: Annotated[str, typer.Option("--reason", help="Required audit reason.")],
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--real",
+            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+        ),
+    ] = True,
+) -> None:
+    """Queue a dry-run website access command for an enrolled agent."""
+    try:
+        command = enqueue_agent_site_command(
+            _database_path(),
+            agent_id=agent_id,
+            action=action,
+            domain=domain,
+            reason=reason,
+            dry_run=dry_run,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
+@agent_command_app.command("binary")
+@agent_command_app.command("app")
+def agent_command_application(
+    agent_id: Annotated[str, typer.Option("--agent-id", help="Target endpoint agent ID.")],
+    action: Annotated[
+        str,
+        typer.Option("--action", help="Application network action: block or unblock."),
+    ],
+    executable: Annotated[
+        str,
+        typer.Option("--executable", help="Executable name or full path, for example dota2.exe."),
+    ],
+    reason: Annotated[str, typer.Option("--reason", help="Required audit reason.")],
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--real",
+            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+        ),
+    ] = True,
+) -> None:
+    """Queue a dry-run application network command for an enrolled agent."""
+    try:
+        command = enqueue_agent_app_command(
+            _database_path(),
+            agent_id=agent_id,
+            action=action,
+            executable=executable,
+            reason=reason,
+            dry_run=dry_run,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
+@agent_command_app.command("speed")
+def agent_command_speed(
+    agent_id: Annotated[str, typer.Option("--agent-id", help="Target endpoint agent ID.")],
+    reason: Annotated[str, typer.Option("--reason", help="Required audit reason.")],
+    download_kbps: Annotated[
+        int | None,
+        typer.Option("--download-kbps", help="Download limit in kilobits per second."),
+    ] = None,
+    upload_kbps: Annotated[
+        int | None,
+        typer.Option("--upload-kbps", help="Upload limit in kilobits per second."),
+    ] = None,
+    clear: Annotated[
+        bool,
+        typer.Option("--clear", help="Clear the endpoint speed limit."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--real",
+            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+        ),
+    ] = True,
+) -> None:
+    """Queue a dry-run speed limit command for an enrolled agent."""
+    try:
+        command = enqueue_agent_speed_command(
+            _database_path(),
+            agent_id=agent_id,
+            download_kbps=download_kbps,
+            upload_kbps=upload_kbps,
+            clear=clear,
+            reason=reason,
+            dry_run=dry_run,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
 
 
 @agent_command_app.command("list")
@@ -296,10 +405,35 @@ def _render_config(
 
 
 def _payload_summary(payload: dict[str, object]) -> str:
-    action = payload.get("action", "-")
-    ip_address = payload.get("ip_address", "-")
+    action = str(payload.get("action", "-"))
     dry_run = payload.get("dry_run", "-")
-    return f"{action} {ip_address} dry-run={dry_run}"
+    if "ip_address" in payload:
+        return f"{action} {payload.get('ip_address', '-')} dry-run={dry_run}"
+    if "domain" in payload:
+        return f"{action} site {payload.get('domain', '-')} dry-run={dry_run}"
+    if "executable" in payload:
+        return f"{action} app {payload.get('executable', '-')} dry-run={dry_run}"
+    if action == "clear":
+        return f"clear speed dry-run={dry_run}"
+    if "download_kbps" in payload or "upload_kbps" in payload:
+        return (
+            f"limit speed down={payload.get('download_kbps', '-')} "
+            f"up={payload.get('upload_kbps', '-')} dry-run={dry_run}"
+        )
+    return f"{action} dry-run={dry_run}"
+
+
+def _render_agent_command(command: AgentCommandRecord) -> None:
+    console.print("Endpoint command queued.")
+    table = Table(title="Agent Command")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Command ID", command.command_id)
+    table.add_row("Agent ID", command.agent_id)
+    table.add_row("Type", command.command_type)
+    table.add_row("Status", command.status)
+    table.add_row("Payload", _payload_summary(command.payload))
+    console.print(table)
 
 
 def _fail(exc: Exception) -> None:

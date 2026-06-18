@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import re
@@ -16,17 +15,22 @@ from urllib.parse import urlparse
 
 from netorium.core.audit import write_audit_entry
 from netorium.core.database import connect_database, initialize_database
+from netorium.services.command_signing import build_agent_command_signature, hash_shared_secret
 
 DEFAULT_CONTROLLER_HOST = "0.0.0.0"
 DEFAULT_CONTROLLER_PORT = 8765
 TOKEN_PURPOSE_ENROLL = "enroll"
 COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
+COMMAND_TYPE_SITE_ACCESS = "network.site"
+COMMAND_TYPE_APP_ACCESS = "network.app"
+COMMAND_TYPE_SPEED_LIMIT = "network.speed"
 COMMAND_STATUS_QUEUED = "queued"
 COMMAND_STATUS_DELIVERED = "delivered"
 COMMAND_STATUS_COMPLETED = "completed"
 COMMAND_STATUS_FAILED = "failed"
 
 _TTL_PATTERN = re.compile(r"^(?P<amount>[1-9][0-9]*)(?P<unit>[mhd])$")
+_DOMAIN_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 class ControllerError(RuntimeError):
@@ -96,6 +100,7 @@ class AgentCommandRecord:
     agent_id: str
     command_type: str
     payload: dict[str, Any]
+    signature: str
     status: str
     result_message: str | None
     created_at: str
@@ -256,7 +261,7 @@ def list_agent_commands(
             if clean_agent_id is None:
                 rows = connection.execute(
                     """
-                    SELECT command_id, agent_id, command_type, payload, status,
+                    SELECT command_id, agent_id, command_type, payload, signature, status,
                            result_message, created_at, delivered_at, completed_at
                     FROM agent_commands
                     ORDER BY id DESC
@@ -265,7 +270,7 @@ def list_agent_commands(
             else:
                 rows = connection.execute(
                     """
-                    SELECT command_id, agent_id, command_type, payload, status,
+                    SELECT command_id, agent_id, command_type, payload, signature, status,
                            result_message, created_at, delivered_at, completed_at
                     FROM agent_commands
                     WHERE agent_id = ?
@@ -303,6 +308,145 @@ def enqueue_agent_firewall_command(
         "reason": clean_reason,
         "dry_run": True,
     }
+    return _enqueue_agent_command(
+        database_path,
+        agent_id=clean_agent_id,
+        command_type=COMMAND_TYPE_FIREWALL_IP,
+        payload=payload,
+        audit_details={
+            "action": clean_action,
+            "ip_address": clean_ip,
+            "dry_run": True,
+        },
+    )
+
+
+def enqueue_agent_site_command(
+    database_path: str | Path,
+    *,
+    agent_id: str,
+    action: str,
+    domain: str,
+    reason: str,
+    dry_run: bool = True,
+) -> AgentCommandRecord:
+    clean_agent_id = _normalize_text(agent_id, "Agent ID")
+    clean_action = _normalize_policy_action(action, "Site policy action")
+    clean_domain = _normalize_domain(domain)
+    clean_reason = _normalize_text(reason, "Site policy reason")
+    if not dry_run:
+        raise ControllerError("Only dry-run endpoint site commands are supported in this checkpoint.")
+
+    payload: dict[str, Any] = {
+        "action": clean_action,
+        "domain": clean_domain,
+        "reason": clean_reason,
+        "dry_run": True,
+    }
+    return _enqueue_agent_command(
+        database_path,
+        agent_id=clean_agent_id,
+        command_type=COMMAND_TYPE_SITE_ACCESS,
+        payload=payload,
+        audit_details={
+            "action": clean_action,
+            "domain": clean_domain,
+            "dry_run": True,
+        },
+    )
+
+
+def enqueue_agent_app_command(
+    database_path: str | Path,
+    *,
+    agent_id: str,
+    action: str,
+    executable: str,
+    reason: str,
+    dry_run: bool = True,
+) -> AgentCommandRecord:
+    clean_agent_id = _normalize_text(agent_id, "Agent ID")
+    clean_action = _normalize_policy_action(action, "Application network action")
+    clean_executable = _normalize_executable(executable)
+    clean_reason = _normalize_text(reason, "Application network reason")
+    if not dry_run:
+        raise ControllerError("Only dry-run endpoint application commands are supported in this checkpoint.")
+
+    payload: dict[str, Any] = {
+        "action": clean_action,
+        "executable": clean_executable,
+        "reason": clean_reason,
+        "dry_run": True,
+    }
+    return _enqueue_agent_command(
+        database_path,
+        agent_id=clean_agent_id,
+        command_type=COMMAND_TYPE_APP_ACCESS,
+        payload=payload,
+        audit_details={
+            "action": clean_action,
+            "executable": clean_executable,
+            "dry_run": True,
+        },
+    )
+
+
+def enqueue_agent_speed_command(
+    database_path: str | Path,
+    *,
+    agent_id: str,
+    download_kbps: int | None,
+    upload_kbps: int | None,
+    reason: str,
+    clear: bool = False,
+    dry_run: bool = True,
+) -> AgentCommandRecord:
+    clean_agent_id = _normalize_text(agent_id, "Agent ID")
+    clean_reason = _normalize_text(reason, "Speed policy reason")
+    if not dry_run:
+        raise ControllerError("Only dry-run endpoint speed commands are supported in this checkpoint.")
+
+    if clear:
+        payload: dict[str, Any] = {
+            "action": "clear",
+            "reason": clean_reason,
+            "dry_run": True,
+        }
+    else:
+        clean_download = _normalize_optional_kbps(download_kbps, "Download speed")
+        clean_upload = _normalize_optional_kbps(upload_kbps, "Upload speed")
+        if clean_download is None and clean_upload is None:
+            raise ControllerError("Speed limit requires --download-kbps, --upload-kbps, or --clear.")
+        payload = {
+            "action": "limit",
+            "download_kbps": clean_download,
+            "upload_kbps": clean_upload,
+            "reason": clean_reason,
+            "dry_run": True,
+        }
+
+    return _enqueue_agent_command(
+        database_path,
+        agent_id=clean_agent_id,
+        command_type=COMMAND_TYPE_SPEED_LIMIT,
+        payload=payload,
+        audit_details={
+            "action": payload["action"],
+            "download_kbps": payload.get("download_kbps"),
+            "upload_kbps": payload.get("upload_kbps"),
+            "dry_run": True,
+        },
+    )
+
+
+def _enqueue_agent_command(
+    database_path: str | Path,
+    *,
+    agent_id: str,
+    command_type: str,
+    payload: dict[str, Any],
+    audit_details: dict[str, Any],
+) -> AgentCommandRecord:
     path = initialize_database(database_path)
     timestamp = _utc_timestamp()
 
@@ -314,15 +458,24 @@ def enqueue_agent_firewall_command(
                 with connection:
                     agent_row = connection.execute(
                         """
-                        SELECT agent_id
+                        SELECT agent_id, device_token_hash
                         FROM agents
                         WHERE agent_id = ?
                         """,
-                        (clean_agent_id,),
+                        (agent_id,),
                     ).fetchone()
                     if agent_row is None:
-                        raise ControllerError(f"Agent was not found: {clean_agent_id}")
+                        raise ControllerError(f"Agent was not found: {agent_id}")
 
+                    device_token_hash = str(agent_row["device_token_hash"])
+                    signature = build_agent_command_signature(
+                        signing_key=device_token_hash,
+                        agent_id=agent_id,
+                        command_id=command_id,
+                        command_type=command_type,
+                        payload=payload,
+                        created_at=timestamp,
+                    )
                     connection.execute(
                         """
                         INSERT INTO agent_commands(
@@ -330,16 +483,18 @@ def enqueue_agent_firewall_command(
                             agent_id,
                             command_type,
                             payload,
+                            signature,
                             status,
                             created_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             command_id,
-                            clean_agent_id,
-                            COMMAND_TYPE_FIREWALL_IP,
+                            agent_id,
+                            command_type,
                             json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                            signature,
                             COMMAND_STATUS_QUEUED,
                             timestamp,
                         ),
@@ -350,11 +505,9 @@ def enqueue_agent_firewall_command(
                         entity_type="agent_command",
                         entity_id=command_id,
                         details={
-                            "agent_id": clean_agent_id,
-                            "command_type": COMMAND_TYPE_FIREWALL_IP,
-                            "action": clean_action,
-                            "ip_address": clean_ip,
-                            "dry_run": True,
+                            "agent_id": agent_id,
+                            "command_type": command_type,
+                            **audit_details,
                         },
                         created_at=timestamp,
                     )
@@ -367,9 +520,10 @@ def enqueue_agent_firewall_command(
 
         return AgentCommandRecord(
             command_id=command_id,
-            agent_id=clean_agent_id,
-            command_type=COMMAND_TYPE_FIREWALL_IP,
+            agent_id=agent_id,
+            command_type=command_type,
             payload=payload,
+            signature=signature,
             status=COMMAND_STATUS_QUEUED,
             result_message=None,
             created_at=timestamp,
@@ -573,7 +727,7 @@ def record_agent_heartbeat(
                     raise ControllerError("Agent heartbeat was rejected.")
                 command_rows = connection.execute(
                     """
-                    SELECT command_id, agent_id, command_type, payload, status,
+                    SELECT command_id, agent_id, command_type, payload, signature, status,
                            result_message, created_at, delivered_at, completed_at
                     FROM agent_commands
                     WHERE agent_id = ?
@@ -582,7 +736,27 @@ def record_agent_heartbeat(
                     """,
                     (clean_agent_id, COMMAND_STATUS_QUEUED),
                 ).fetchall()
+                pending_commands: list[dict[str, Any]] = []
                 for row in command_rows:
+                    payload = _decode_payload(str(row["payload"]))
+                    signature = str(row["signature"] or "")
+                    if not signature:
+                        signature = build_agent_command_signature(
+                            signing_key=device_token_hash,
+                            agent_id=clean_agent_id,
+                            command_id=str(row["command_id"]),
+                            command_type=str(row["command_type"]),
+                            payload=payload,
+                            created_at=str(row["created_at"]),
+                        )
+                        connection.execute(
+                            """
+                            UPDATE agent_commands
+                            SET signature = ?
+                            WHERE command_id = ?
+                            """,
+                            (signature, str(row["command_id"])),
+                        )
                     connection.execute(
                         """
                         UPDATE agent_commands
@@ -597,6 +771,9 @@ def record_agent_heartbeat(
                             COMMAND_STATUS_QUEUED,
                         ),
                     )
+                    pending_commands.append(
+                        _agent_command_payload_from_row(row, payload=payload, signature=signature)
+                    )
         finally:
             connection.close()
     except sqlite3.Error as exc:
@@ -605,7 +782,7 @@ def record_agent_heartbeat(
     return AgentHeartbeat(
         agent_id=clean_agent_id,
         accepted_at=timestamp,
-        pending_commands=tuple(_agent_command_payload_from_row(row) for row in command_rows),
+        pending_commands=tuple(pending_commands),
     )
 
 
@@ -702,8 +879,10 @@ def parse_ttl(value: str) -> timedelta:
 
 
 def hash_token(token: str) -> str:
-    clean_token = _normalize_text(token, "Token")
-    return hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
+    try:
+        return hash_shared_secret(token, label="Token")
+    except ValueError as exc:
+        raise ControllerError(str(exc)) from exc
 
 
 def build_enrollment_url(host: str, port: int) -> str:
@@ -948,6 +1127,7 @@ def _agent_command_from_row(row: sqlite3.Row) -> AgentCommandRecord:
         agent_id=str(row["agent_id"]),
         command_type=str(row["command_type"]),
         payload=_decode_payload(str(row["payload"])),
+        signature=str(row["signature"] or ""),
         status=str(row["status"]),
         result_message=str(raw_result_message) if raw_result_message is not None else None,
         created_at=str(row["created_at"]),
@@ -956,11 +1136,17 @@ def _agent_command_from_row(row: sqlite3.Row) -> AgentCommandRecord:
     )
 
 
-def _agent_command_payload_from_row(row: sqlite3.Row) -> dict[str, Any]:
+def _agent_command_payload_from_row(
+    row: sqlite3.Row,
+    *,
+    payload: dict[str, Any] | None = None,
+    signature: str | None = None,
+) -> dict[str, Any]:
     return {
         "command_id": str(row["command_id"]),
         "command_type": str(row["command_type"]),
-        "payload": _decode_payload(str(row["payload"])),
+        "payload": payload if payload is not None else _decode_payload(str(row["payload"])),
+        "signature": signature if signature is not None else str(row["signature"] or ""),
         "created_at": str(row["created_at"]),
     }
 
@@ -982,11 +1168,71 @@ def _normalize_firewall_action(value: str) -> str:
     return clean_value
 
 
+def _normalize_policy_action(value: str, label: str) -> str:
+    clean_value = value.strip().lower()
+    if clean_value not in {"block", "unblock"}:
+        raise ControllerError(f"{label} must be block or unblock.")
+    return clean_value
+
+
 def _normalize_ip_address(value: str) -> str:
     try:
         return str(ipaddress.ip_address(value.strip()))
     except ValueError as exc:
         raise ControllerError(f"Invalid IP address: {value}") from exc
+
+
+def _normalize_domain(value: str) -> str:
+    raw_value = _normalize_text(value, "Site domain").lower()
+    wildcard = raw_value.startswith("*.")
+    if wildcard:
+        raw_value = raw_value[2:]
+
+    parsed = urlparse(raw_value if "://" in raw_value else f"//{raw_value}")
+    host = parsed.hostname or raw_value.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    host = host.strip().lower().rstrip(".")
+    if host.startswith("*."):
+        wildcard = True
+        host = host[2:]
+
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ControllerError("Site policy target must be a domain name, not an IP address.")
+
+    if not _is_valid_hostname(host):
+        raise ControllerError(f"Invalid site domain: {value}")
+    return f"*.{host}" if wildcard else host
+
+
+def _is_valid_hostname(value: str) -> bool:
+    if len(value) > 253:
+        return False
+    labels = value.split(".")
+    return all(_DOMAIN_LABEL_PATTERN.fullmatch(label) is not None for label in labels)
+
+
+def _normalize_executable(value: str) -> str:
+    clean_value = _normalize_text(value, "Executable").strip("'\"").strip()
+    if not clean_value:
+        raise ControllerError("Executable cannot be empty.")
+    if "\x00" in clean_value or any(char in clean_value for char in "\r\n"):
+        raise ControllerError("Executable cannot contain control characters.")
+    if len(clean_value) > 1024:
+        raise ControllerError("Executable path is too long.")
+    return clean_value
+
+
+def _normalize_optional_kbps(value: int | None, label: str) -> int | None:
+    if value is None:
+        return None
+    if value < 1:
+        raise ControllerError(f"{label} must be at least 1 kbps.")
+    if value > 10_000_000:
+        raise ControllerError(f"{label} must be 10000000 kbps or less.")
+    return value
 
 
 def _normalize_command_result_status(value: str) -> str:

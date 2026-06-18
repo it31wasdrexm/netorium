@@ -136,6 +136,92 @@ def test_controller_agent_command_firewall_and_list(tmp_path: Path) -> None:
     assert "queued" in list_result.output
 
 
+def test_controller_agent_policy_commands_and_list(tmp_path: Path) -> None:
+    env = _write_config(tmp_path)
+    database_path = tmp_path / "state" / "netorium.db"
+    runner.invoke(
+        app,
+        ["controller", "init", "--host", "192.168.1.10", "--port", "8765"],
+        env=env,
+    )
+    token = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    enrollment = enroll_agent(database_path, token=token.token, hostname="pc-game-01")
+
+    site_result = runner.invoke(
+        app,
+        [
+            "controller",
+            "agent",
+            "command",
+            "site",
+            "--agent-id",
+            enrollment.agent_id,
+            "--action",
+            "block",
+            "--domain",
+            "https://youtube.com/watch?v=abc",
+            "--reason",
+            "Class policy",
+        ],
+        env=env,
+    )
+    app_result = runner.invoke(
+        app,
+        [
+            "controller",
+            "agent",
+            "command",
+            "binary",
+            "--agent-id",
+            enrollment.agent_id,
+            "--action",
+            "block",
+            "--executable",
+            "cs1.6.exe",
+            "--reason",
+            "No game traffic",
+        ],
+        env=env,
+    )
+    speed_result = runner.invoke(
+        app,
+        [
+            "controller",
+            "agent",
+            "command",
+            "speed",
+            "--agent-id",
+            enrollment.agent_id,
+            "--download-kbps",
+            "2048",
+            "--upload-kbps",
+            "512",
+            "--reason",
+            "Temporary limit",
+        ],
+        env=env,
+    )
+    list_result = runner.invoke(
+        app,
+        ["controller", "agent", "command", "list", "--agent-id", enrollment.agent_id],
+        env=env,
+    )
+
+    assert site_result.exit_code == 0
+    assert "network.site" in site_result.output
+    assert "youtube.com" in site_result.output
+    assert app_result.exit_code == 0
+    assert "network.app" in app_result.output
+    assert "cs1.6.exe" in app_result.output
+    assert speed_result.exit_code == 0
+    assert "network.speed" in speed_result.output
+    assert "down=2048" in speed_result.output
+    assert list_result.exit_code == 0
+    assert "network.site" in list_result.output
+    assert "network.app" in list_result.output
+    assert "network.speed" in list_result.output
+
+
 def _write_config(tmp_path: Path) -> dict[str, str]:
     database_path = tmp_path / "state" / "netorium.db"
     config_dir = isolated_config_dir(tmp_path)

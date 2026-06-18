@@ -25,10 +25,13 @@ def test_docs_commands_page() -> None:
     assert "uninstall --yes --remove-data" in result.output
     assert "controller token create" in result.output
     assert "controller agent command firewall" in result.output
+    assert "controller agent command site" in result.output
+    assert "controller agent command app" in result.output
+    assert "controller agent command speed" in result.output
     assert "deploy script windows" in result.output
     assert "netorium-agent enroll" in result.output
     assert "sends a heartbeat" in result.output
-    assert "dry-run endpoint firewall commands" in result.output
+    assert "website, application, and speed-limit commands" in result.output
     assert "shown only once" in result.output
 
 
@@ -65,6 +68,8 @@ def test_docs_install_page() -> None:
     assert "netorium-agent enroll" in result.output
     assert "heartbeat checks" in result.output
     assert "controller agent command firewall" in result.output
+    assert "controller agent command site" in result.output
+    assert "controller agent command speed" in result.output
     assert "build-windows.cmd" not in result.output
     assert ".venv-win" in result.output
 

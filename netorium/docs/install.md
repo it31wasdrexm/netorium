@@ -241,17 +241,22 @@ netorium-agent run
 
 The current agent stores endpoint state locally, does not print enrollment or
 device tokens, and sends heartbeat checks to the controller. The controller can
-queue dry-run endpoint firewall commands, and `netorium-agent run` reports the
-completed or failed result back to the controller:
+queue signed dry-run endpoint commands, and `netorium-agent run` verifies the
+signature before reporting the completed or failed result back to the controller:
 
 ```bash
 netorium controller agent command firewall --agent-id AGENT_ID --action block --ip 192.168.1.25 --reason "Policy test"
+netorium controller agent command site --agent-id AGENT_ID --action block --domain youtube.com --reason "Class policy"
+netorium controller agent command app --agent-id AGENT_ID --action block --executable dota2.exe --reason "No game traffic"
+netorium controller agent command speed --agent-id AGENT_ID --download-kbps 2048 --upload-kbps 512 --reason "Temporary limit"
 netorium-agent run
 netorium controller agent command list --agent-id AGENT_ID
 ```
 
-Real endpoint firewall application, command signing, and rollback are the next
-deployment phase.
+Current dry-run command types cover endpoint firewall IP actions, site
+block/unblock by domain, application/binary network block/unblock, and
+per-agent speed limit set/clear. Real endpoint firewall/application/QoS
+application and rollback are the next deployment phase.
 
 ## Local Checkout
 

@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 import requests
 
+from netorium.services.command_signing import build_agent_command_signature, hash_shared_secret
 from netorium.services.agent import (
     AgentError,
     enroll_agent,
@@ -212,17 +213,17 @@ def test_run_agent_once_processes_dry_run_firewall_command(tmp_path: Path) -> No
                     "agent_id": "agt_123",
                     "accepted_at": "2026-06-16T10:01:00+00:00",
                     "commands": [
-                        {
-                            "command_id": "cmd_123",
-                            "command_type": "firewall.ip",
-                            "payload": {
+                        _signed_command(
+                            command_id="cmd_123",
+                            command_type="firewall.ip",
+                            payload={
                                 "action": "block",
                                 "dry_run": True,
                                 "ip_address": "192.168.1.25",
                                 "reason": "Policy test",
                             },
-                            "created_at": "2026-06-16T10:00:30+00:00",
-                        }
+                            created_at="2026-06-16T10:00:30+00:00",
+                        )
                     ],
                 },
             ),
@@ -262,7 +263,148 @@ def test_run_agent_once_processes_dry_run_firewall_command(tmp_path: Path) -> No
     ]
 
 
+def test_run_agent_once_processes_site_app_and_speed_policy_commands(tmp_path: Path) -> None:
+    state_path = tmp_path / "agent.json"
+    enroll_agent(
+        controller_url="http://192.168.1.10:8765",
+        token="ng_enroll_secret",
+        hostname="pc-game-01",
+        state_path=state_path,
+        client=FakeClient(
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "device_token": "ng_device_secret",
+                    "hostname": "pc-game-01",
+                    "zone": "gaming-room",
+                    "enrolled_at": "2026-06-16T10:00:00+00:00",
+                },
+            )
+        ),
+    )
+    client = SequenceClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "accepted_at": "2026-06-16T10:01:00+00:00",
+                    "commands": [
+                        _signed_command(
+                            command_id="cmd_site",
+                            command_type="network.site",
+                            payload={
+                                "action": "block",
+                                "dry_run": True,
+                                "domain": "*.youtube.com",
+                                "reason": "Class policy",
+                            },
+                            created_at="2026-06-16T10:00:30+00:00",
+                        ),
+                        _signed_command(
+                            command_id="cmd_app",
+                            command_type="network.app",
+                            payload={
+                                "action": "block",
+                                "dry_run": True,
+                                "executable": "dota2.exe",
+                                "reason": "No game traffic",
+                            },
+                            created_at="2026-06-16T10:00:31+00:00",
+                        ),
+                        _signed_command(
+                            command_id="cmd_speed",
+                            command_type="network.speed",
+                            payload={
+                                "action": "limit",
+                                "download_kbps": 2048,
+                                "upload_kbps": 512,
+                                "dry_run": True,
+                                "reason": "Temporary limit",
+                            },
+                            created_at="2026-06-16T10:00:32+00:00",
+                        ),
+                    ],
+                },
+            ),
+            FakeResponse(200, {"status": "completed"}),
+            FakeResponse(200, {"status": "completed"}),
+            FakeResponse(200, {"status": "completed"}),
+        ]
+    )
+
+    result = run_agent_once(state_path, client=client)
+
+    assert result.message == "Heartbeat accepted; processed 3 endpoint command(s)."
+    assert [command.status for command in result.command_results] == [
+        "completed",
+        "completed",
+        "completed",
+    ]
+    assert "Dry-run site block accepted for *.youtube.com" in result.command_results[0].message
+    assert "Dry-run app block accepted for dota2.exe" in result.command_results[1].message
+    assert "download=2048kbps upload=512kbps" in result.command_results[2].message
+    assert [request[1]["command_id"] for request in client.requests[1:]] == [
+        "cmd_site",
+        "cmd_app",
+        "cmd_speed",
+    ]
+
+
 def test_run_agent_once_rejects_real_firewall_command(tmp_path: Path) -> None:
+    state_path = tmp_path / "agent.json"
+    enroll_agent(
+        controller_url="http://192.168.1.10:8765",
+        token="ng_enroll_secret",
+        hostname="pc-acc-01",
+        state_path=state_path,
+        client=FakeClient(
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "device_token": "ng_device_secret",
+                    "hostname": "pc-acc-01",
+                    "zone": "accounting",
+                    "enrolled_at": "2026-06-16T10:00:00+00:00",
+                },
+            )
+        ),
+    )
+    client = SequenceClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "agent_id": "agt_123",
+                    "accepted_at": "2026-06-16T10:01:00+00:00",
+                    "commands": [
+                        _signed_command(
+                            command_id="cmd_123",
+                            command_type="firewall.ip",
+                            payload={
+                                "action": "block",
+                                "dry_run": False,
+                                "ip_address": "192.168.1.25",
+                                "reason": "Policy test",
+                            },
+                            created_at="2026-06-16T10:00:30+00:00",
+                        )
+                    ],
+                },
+            ),
+            FakeResponse(200, {"status": "failed"}),
+        ]
+    )
+
+    result = run_agent_once(state_path, client=client)
+
+    assert result.command_results[0].status == "failed"
+    assert result.command_results[0].message == "Real endpoint firewall commands are not implemented yet."
+
+
+def test_run_agent_once_rejects_unsigned_or_tampered_command(tmp_path: Path) -> None:
     state_path = tmp_path / "agent.json"
     enroll_agent(
         controller_url="http://192.168.1.10:8765",
@@ -295,10 +437,12 @@ def test_run_agent_once_rejects_real_firewall_command(tmp_path: Path) -> None:
                             "command_type": "firewall.ip",
                             "payload": {
                                 "action": "block",
-                                "dry_run": False,
+                                "dry_run": True,
                                 "ip_address": "192.168.1.25",
                                 "reason": "Policy test",
                             },
+                            "signature": "bad-signature",
+                            "created_at": "2026-06-16T10:00:30+00:00",
                         }
                     ],
                 },
@@ -310,7 +454,8 @@ def test_run_agent_once_rejects_real_firewall_command(tmp_path: Path) -> None:
     result = run_agent_once(state_path, client=client)
 
     assert result.command_results[0].status == "failed"
-    assert result.command_results[0].message == "Real endpoint firewall commands are not implemented yet."
+    assert result.command_results[0].message == "Agent command signature is invalid."
+    assert client.requests[1][1]["message"] == "Agent command signature is invalid."
 
 
 def test_service_action_is_placeholder_for_mvp() -> None:
@@ -318,3 +463,27 @@ def test_service_action_is_placeholder_for_mvp() -> None:
 
     with pytest.raises(AgentError, match="Unsupported"):
         service_action("restart")
+
+
+def _signed_command(
+    *,
+    command_id: str,
+    command_type: str,
+    payload: dict[str, Any],
+    created_at: str,
+) -> dict[str, Any]:
+    signing_key = hash_shared_secret("ng_device_secret", label="Device token")
+    return {
+        "command_id": command_id,
+        "command_type": command_type,
+        "payload": payload,
+        "signature": build_agent_command_signature(
+            signing_key=signing_key,
+            agent_id="agt_123",
+            command_id=command_id,
+            command_type=command_type,
+            payload=payload,
+            created_at=created_at,
+        ),
+        "created_at": created_at,
+    }

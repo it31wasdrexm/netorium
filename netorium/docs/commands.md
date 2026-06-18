@@ -68,6 +68,11 @@ netorium controller start --host 0.0.0.0 --port 8765
 netorium controller token create --zone accounting --ttl 24h
 netorium controller agent list
 netorium controller agent command firewall --agent-id AGENT_ID --action block --ip 192.168.1.25 --reason "Policy test"
+netorium controller agent command site --agent-id AGENT_ID --action block --domain youtube.com --reason "Class policy"
+netorium controller agent command app --agent-id AGENT_ID --action block --executable dota2.exe --reason "No game traffic"
+netorium controller agent command binary --agent-id AGENT_ID --action block --executable cs1.6.exe --reason "No game traffic"
+netorium controller agent command speed --agent-id AGENT_ID --download-kbps 2048 --upload-kbps 512 --reason "Temporary limit"
+netorium controller agent command speed --agent-id AGENT_ID --clear --reason "Limit removed"
 netorium controller agent command list --agent-id AGENT_ID
 ```
 
@@ -75,7 +80,10 @@ The controller is a local LAN process for the main administrator PC. It stores
 MVP state in SQLite, prints an enrollment URL for office agents, and creates
 one-time enrollment tokens. Raw enrollment tokens are shown only once; the local
 database stores their hashes. Controller agent commands are queued in SQLite and
-are limited to dry-run endpoint firewall commands in this checkpoint.
+are signed before delivery, then limited to dry-run endpoint commands in this
+checkpoint. Supported endpoint command payloads are IP firewall actions, website
+domain block/unblock, application/binary network block/unblock, and per-agent
+speed-limit set/clear.
 
 ## Deployment
 
@@ -106,10 +114,10 @@ netorium-agent update check
 The agent enrolls with the local controller, stores endpoint state in the user's
 Netorium config directory, and never prints enrollment or device tokens. The
 foreground `run` command sends a heartbeat to the controller and receives the
-current command queue. It can process dry-run endpoint firewall commands and
-report completed or failed command results back to the controller. Real endpoint
-firewall application, command signing, and rollback are the next deployment
-phase.
+current command queue. It verifies controller signatures, can process dry-run
+endpoint firewall, website, application, and speed-limit commands, and reports
+completed or failed command results back to the controller. Real endpoint
+firewall/application/QoS application and rollback are the next deployment phase.
 
 ## Zones
 

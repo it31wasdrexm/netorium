@@ -11,7 +11,7 @@ from typer.main import get_command
 from netorium.cli.commands.ad import ad_app
 from netorium.cli.commands.audit import audit_app
 from netorium.cli.commands.config import config_app
-from netorium.cli.commands.controller import controller_app
+from netorium.cli.commands.controller import controller_app, policy_app
 from netorium.cli.commands.deploy import deploy_app
 from netorium.cli.commands.device import device_app
 from netorium.cli.commands.docs import docs_app
@@ -46,6 +46,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(docs_app, name="docs")
 app.add_typer(update_app, name="update")
 app.add_typer(controller_app, name="controller")
+app.add_typer(policy_app, name="policy")
 app.add_typer(deploy_app, name="deploy")
 app.add_typer(zone_app, name="zone")
 app.add_typer(device_app, name="device")

@@ -68,6 +68,25 @@ def test_real_app_policy_uses_windows_firewall_program_rule(
     assert "-Program 'C:\\Games\\dota2.exe'" in script
 
 
+def test_real_app_policy_searches_by_executable_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder = RunRecorder()
+    monkeypatch.setattr(subprocess, "run", recorder)
+
+    result = apply_app_policy(
+        action="block",
+        executable="dota2.exe",
+        reason="No game traffic",
+        platform_name="Windows",
+    )
+
+    assert "dota2.exe" in result.message
+    script = _script(recorder.commands[0])
+    assert "Get-ChildItem" in script
+    assert "dota2.exe" in script
+
+
 def test_real_site_policy_updates_hosts_file_and_flushes_dns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

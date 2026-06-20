@@ -431,3 +431,33 @@ def test_controller_migrates_existing_agent_command_signature_column(tmp_path: P
         connection.close()
 
     assert "signature" in columns
+
+
+def test_resolve_agent_targets_supports_id_hostname_and_all(tmp_path: Path) -> None:
+    from netorium.services.controller import enqueue_agent_site_commands, resolve_agent_targets
+
+    database_path = tmp_path / "netorium.db"
+    init_controller(database_path, host="192.168.1.10", port=8765)
+    token_one = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    token_two = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    first = enroll_agent(database_path, token=token_one.token, hostname="pc-game-01")
+    second = enroll_agent(database_path, token=token_two.token, hostname="pc-game-02")
+
+    by_id = resolve_agent_targets(database_path, first.agent_id)
+    by_hostname = resolve_agent_targets(database_path, "pc-game-02")
+    all_agents = resolve_agent_targets(database_path, "all")
+
+    assert [agent.agent_id for agent in by_id] == [first.agent_id]
+    assert [agent.agent_id for agent in by_hostname] == [second.agent_id]
+    assert {agent.agent_id for agent in all_agents} == {first.agent_id, second.agent_id}
+
+    batch = enqueue_agent_site_commands(
+        database_path,
+        agent_selector="all",
+        action="block",
+        domain="youtube.com",
+        reason="Class policy",
+    )
+
+    assert len(batch.commands) == 2
+    assert batch.commands[0].command_type == "network.site"

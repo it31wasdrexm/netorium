@@ -93,6 +93,29 @@ Real endpoint commands require the agent to run on Windows with administrator
 rights. Windows QoS throttles outbound traffic; reliable download limiting needs
 a router, gateway, or future packet-filter adapter.
 
+## Policy Shortcuts
+
+Shorter commands for everyday endpoint blocking. Target one agent by ID,
+hostname, or every enrolled agent with `all`.
+
+```bash
+netorium policy agents
+netorium policy list
+netorium policy site AGENT_OR_ALL youtube.com --reason "Class policy"
+netorium policy site all youtube.com --reason "Class policy" --real
+netorium policy game AGENT_OR_ALL dota2.exe --reason "No game traffic"
+netorium policy game all cs1.6.exe --reason "No game traffic" --real
+netorium policy app AGENT_OR_ALL "C:\Games\cs1.6.exe" --reason "No game traffic" --real
+netorium policy speed AGENT_OR_ALL --reason "Temporary limit" --down 2048 --up 512 --real
+netorium policy clear-speed all --reason "Limit removed" --real
+```
+
+`policy game` is an alias for `policy app`. Dry-run is the default; add `--real`
+to queue a real Windows endpoint command. Add `--unblock` to remove a site or
+application block.
+
+See `TESTING_RU.md` in the repository root for a full copy-paste testing flow.
+
 ## Deployment
 
 ```bash

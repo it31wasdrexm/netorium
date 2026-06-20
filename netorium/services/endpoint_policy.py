@@ -101,18 +101,10 @@ def apply_app_policy(
     _require_windows(platform_name)
     rule_name = _rule_name("App", executable)
     if action == "block":
-        script = (
-            f"$Name = {_ps_quote(rule_name)}; "
-            "Remove-NetFirewallRule -DisplayName $Name -ErrorAction SilentlyContinue; "
-            "New-NetFirewallRule "
-            "-DisplayName $Name "
-            "-Direction Outbound "
-            f"-Program {_ps_quote(executable)} "
-            "-Action Block "
-            "-Profile Any "
-            f"-Description {_ps_quote(reason)} "
-            "-ErrorAction Stop"
-        )
+        if _looks_like_executable_path(executable):
+            script = _app_block_program_script(rule_name, executable, reason)
+        else:
+            script = _app_block_by_name_script(rule_name, executable, reason)
     elif action == "unblock":
         script = (
             f"Remove-NetFirewallRule -DisplayName {_ps_quote(rule_name)} "
@@ -201,10 +193,64 @@ def _run_powershell(script: str) -> None:
 
 def _hosts_domains(domain: str) -> list[str]:
     clean_domain = domain[2:] if domain.startswith("*.") else domain
-    domains = [clean_domain]
+    domains = {clean_domain}
     if not clean_domain.startswith("www."):
-        domains.append(f"www.{clean_domain}")
-    return domains
+        domains.add(f"www.{clean_domain}")
+    for prefix in ("m", "mobile", "music", "api", "cdn", "static", "i", "s", "login", "auth"):
+        domains.add(f"{prefix}.{clean_domain}")
+    return sorted(domains)
+
+
+def _looks_like_executable_path(executable: str) -> bool:
+    return any(marker in executable for marker in ("\\", "/", ":"))
+
+
+def _app_block_program_script(rule_name: str, executable: str, reason: str) -> str:
+    return (
+        f"$Name = {_ps_quote(rule_name)}; "
+        "Remove-NetFirewallRule -DisplayName $Name -ErrorAction SilentlyContinue; "
+        "New-NetFirewallRule "
+        "-DisplayName $Name "
+        "-Direction Outbound "
+        f"-Program {_ps_quote(executable)} "
+        "-Action Block "
+        "-Profile Any "
+        f"-Description {_ps_quote(reason)} "
+        "-ErrorAction Stop"
+    )
+
+
+def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> str:
+    return (
+        f"$Name = {_ps_quote(rule_name)}; "
+        f"$ExeName = {_ps_quote(executable)}; "
+        "$SearchRoots = @("
+        "$env:ProgramFiles, "
+        "${env:ProgramFiles(x86)}, "
+        "$env:LOCALAPPDATA, "
+        "(Join-Path $env:ProgramFiles 'Steam'), "
+        "(Join-Path ${env:ProgramFiles(x86)} 'Steam'), "
+        "(Join-Path $env:LOCALAPPDATA 'Programs')"
+        ") | Where-Object { $_ -and (Test-Path $_) }; "
+        "$Matches = foreach ($Root in $SearchRoots) { "
+        "Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 6 "
+        "-ErrorAction SilentlyContinue }; "
+        "$Matches = @($Matches | Select-Object -ExpandProperty FullName -Unique); "
+        "if ($Matches.Count -eq 0) { "
+        f"throw 'Executable not found: {executable}'; "
+        "} "
+        "Remove-NetFirewallRule -DisplayName $Name -ErrorAction SilentlyContinue; "
+        "foreach ($Program in $Matches) { "
+        "New-NetFirewallRule "
+        "-DisplayName $Name "
+        "-Direction Outbound "
+        "-Program $Program "
+        "-Action Block "
+        "-Profile Any "
+        f"-Description {_ps_quote(reason)} "
+        "-ErrorAction Stop "
+        "}"
+    )
 
 
 def _remove_marked_block(text: str, start_marker: str, end_marker: str) -> str:

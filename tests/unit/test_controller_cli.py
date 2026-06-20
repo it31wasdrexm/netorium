@@ -222,6 +222,73 @@ def test_controller_agent_policy_commands_and_list(tmp_path: Path) -> None:
     assert "network.speed" in list_result.output
 
 
+def test_policy_site_and_game_commands_for_all_agents(tmp_path: Path) -> None:
+    env = _write_config(tmp_path)
+    database_path = tmp_path / "state" / "netorium.db"
+    runner.invoke(
+        app,
+        ["controller", "init", "--host", "192.168.1.10", "--port", "8765"],
+        env=env,
+    )
+    token_one = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    token_two = create_enrollment_token(database_path, zone="gaming-room", ttl="24h")
+    enroll_agent(database_path, token=token_one.token, hostname="pc-game-01")
+    enroll_agent(database_path, token=token_two.token, hostname="pc-game-02")
+
+    site_result = runner.invoke(
+        app,
+        ["policy", "site", "all", "youtube.com", "--reason", "Class policy"],
+        env=env,
+    )
+    game_result = runner.invoke(
+        app,
+        ["policy", "game", "all", "dota2.exe", "--reason", "No game traffic"],
+        env=env,
+    )
+    hostname_result = runner.invoke(
+        app,
+        ["policy", "site", "pc-game-01", "vk.com", "--reason", "Focus"],
+        env=env,
+    )
+    ip_result = runner.invoke(
+        app,
+        ["policy", "ip", "all", "1.1.1.1", "--reason", "Block DNS"],
+        env=env,
+    )
+    speed_result = runner.invoke(
+        app,
+        ["policy", "speed", "all", "--down", "2048", "--up", "512", "--reason", "Slowdown"],
+        env=env,
+    )
+    clear_speed_result = runner.invoke(
+        app,
+        ["policy", "clear-speed", "all", "--reason", "Clear limit"],
+        env=env,
+    )
+    list_result = runner.invoke(app, ["policy", "list"], env=env)
+
+    assert site_result.exit_code == 0
+    assert "Queued 2 endpoint command(s)" in site_result.output
+    assert "network.site" in site_result.output
+    assert game_result.exit_code == 0
+    assert "network.app" in game_result.output
+    assert "dota2.exe" in game_result.output
+    assert hostname_result.exit_code == 0
+    assert "vk.com" in hostname_result.output
+    assert ip_result.exit_code == 0
+    assert "firewall.ip" in ip_result.output
+    assert "1.1.1.1" in ip_result.output
+    assert speed_result.exit_code == 0
+    assert "network.speed" in speed_result.output
+    assert "down=2048" in speed_result.output
+    assert clear_speed_result.exit_code == 0
+    assert "clear speed" in clear_speed_result.output
+    assert list_result.exit_code == 0
+    assert list_result.output.count("network.site") >= 2
+    assert "firewall.ip" in list_result.output
+    assert "network.speed" in list_result.output
+
+
 def _write_config(tmp_path: Path) -> dict[str, str]:
     database_path = tmp_path / "state" / "netorium.db"
     config_dir = isolated_config_dir(tmp_path)

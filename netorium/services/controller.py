@@ -247,6 +247,156 @@ def list_agents(database_path: str | Path) -> list[AgentRecord]:
     return [_agent_record_from_row(row) for row in rows]
 
 
+def resolve_agent_targets(
+    database_path: str | Path,
+    selector: str,
+) -> list[AgentRecord]:
+    clean_selector = selector.strip()
+    if not clean_selector:
+        raise ControllerError("Agent target cannot be empty.")
+
+    agents = list_agents(database_path)
+    if clean_selector.lower() in {"all", "*"}:
+        if not agents:
+            raise ControllerError("No agents enrolled yet.")
+        return agents
+
+    for agent in agents:
+        if agent.agent_id == clean_selector:
+            return [agent]
+
+    normalized_selector = clean_selector.lower()
+    hostname_matches = [
+        agent for agent in agents if agent.hostname.lower() == normalized_selector
+    ]
+    if len(hostname_matches) == 1:
+        return hostname_matches
+    if len(hostname_matches) > 1:
+        raise ControllerError(
+            f"Multiple agents share hostname {clean_selector}. Use agent ID instead."
+        )
+
+    raise ControllerError(
+        f"Agent was not found: {clean_selector}. Use agent ID, hostname, or all."
+    )
+
+
+@dataclass(frozen=True)
+class BatchAgentCommandResult:
+    targets: tuple[str, ...]
+    commands: tuple[AgentCommandRecord, ...]
+
+
+def enqueue_agent_firewall_commands(
+    database_path: str | Path,
+    *,
+    agent_selector: str,
+    action: str,
+    ip_address: str,
+    reason: str,
+    dry_run: bool = True,
+) -> BatchAgentCommandResult:
+    targets = resolve_agent_targets(database_path, agent_selector)
+    commands = tuple(
+        enqueue_agent_firewall_command(
+            database_path,
+            agent_id=agent.agent_id,
+            action=action,
+            ip_address=ip_address,
+            reason=reason,
+            dry_run=dry_run,
+        )
+        for agent in targets
+    )
+    return BatchAgentCommandResult(
+        targets=tuple(agent.agent_id for agent in targets),
+        commands=commands,
+    )
+
+
+def enqueue_agent_site_commands(
+    database_path: str | Path,
+    *,
+    agent_selector: str,
+    action: str,
+    domain: str,
+    reason: str,
+    dry_run: bool = True,
+) -> BatchAgentCommandResult:
+    targets = resolve_agent_targets(database_path, agent_selector)
+    commands = tuple(
+        enqueue_agent_site_command(
+            database_path,
+            agent_id=agent.agent_id,
+            action=action,
+            domain=domain,
+            reason=reason,
+            dry_run=dry_run,
+        )
+        for agent in targets
+    )
+    return BatchAgentCommandResult(
+        targets=tuple(agent.agent_id for agent in targets),
+        commands=commands,
+    )
+
+
+def enqueue_agent_app_commands(
+    database_path: str | Path,
+    *,
+    agent_selector: str,
+    action: str,
+    executable: str,
+    reason: str,
+    dry_run: bool = True,
+) -> BatchAgentCommandResult:
+    targets = resolve_agent_targets(database_path, agent_selector)
+    commands = tuple(
+        enqueue_agent_app_command(
+            database_path,
+            agent_id=agent.agent_id,
+            action=action,
+            executable=executable,
+            reason=reason,
+            dry_run=dry_run,
+        )
+        for agent in targets
+    )
+    return BatchAgentCommandResult(
+        targets=tuple(agent.agent_id for agent in targets),
+        commands=commands,
+    )
+
+
+def enqueue_agent_speed_commands(
+    database_path: str | Path,
+    *,
+    agent_selector: str,
+    download_kbps: int | None,
+    upload_kbps: int | None,
+    reason: str,
+    clear: bool = False,
+    dry_run: bool = True,
+) -> BatchAgentCommandResult:
+    targets = resolve_agent_targets(database_path, agent_selector)
+    commands = tuple(
+        enqueue_agent_speed_command(
+            database_path,
+            agent_id=agent.agent_id,
+            download_kbps=download_kbps,
+            upload_kbps=upload_kbps,
+            clear=clear,
+            reason=reason,
+            dry_run=dry_run,
+        )
+        for agent in targets
+    )
+    return BatchAgentCommandResult(
+        targets=tuple(agent.agent_id for agent in targets),
+        commands=commands,
+    )
+
+
 def list_agent_commands(
     database_path: str | Path,
     *,

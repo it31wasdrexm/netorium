@@ -142,7 +142,7 @@ def enroll_agent(
 def load_agent_state(state_path: str | Path | None = None) -> AgentState:
     path = Path(state_path).expanduser() if state_path is not None else default_agent_state_path()
     if not path.exists():
-        raise AgentError(f"Agent is not enrolled. Run `netorium-agent enroll` first. State: {path}")
+        raise AgentError(f"Agent is not enrolled. Run `netorium agent enroll` first. State: {path}")
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -246,11 +246,24 @@ def run_agent_loop(
     import time
 
     while True:
+        status = get_agent_status(state_path)
+        if not status.enrolled:
+            time.sleep(interval_seconds)
+            continue
+
         try:
             run_agent_once(state_path, client=client, timeout=timeout)
         except AgentError:
             pass  # Log silently; the service manager will restart on crash
         time.sleep(interval_seconds)
+
+
+def try_provision_agent_background_service() -> str | None:
+    """Install and start the agent background service when enrollment succeeded."""
+    try:
+        return service_action("install")
+    except AgentError:
+        return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────

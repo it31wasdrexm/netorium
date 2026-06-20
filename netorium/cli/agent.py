@@ -14,6 +14,7 @@ from netorium.services.agent import (
     run_agent_loop,
     run_agent_once,
     service_action,
+    try_provision_agent_background_service,
 )
 
 app = typer.Typer(
@@ -72,6 +73,15 @@ def enroll(
     table.add_row("State", str(state.state_path))
     console.print(table)
 
+    background_message = try_provision_agent_background_service()
+    if background_message is not None:
+        console.print(background_message)
+    else:
+        console.print(
+            "Background service was not installed automatically. "
+            "Run: netorium agent service install"
+        )
+
 
 @app.command()
 def status() -> None:
@@ -92,7 +102,7 @@ def status() -> None:
 
     console.print(table)
     if not agent_status.enrolled:
-        console.print("Run: netorium-agent enroll --controller URL --token TOKEN")
+        console.print("Run: netorium agent enroll --controller URL --token TOKEN")
 
 
 @app.command()

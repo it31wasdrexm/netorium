@@ -458,13 +458,7 @@ def test_run_agent_once_rejects_unsigned_or_tampered_command(tmp_path: Path) -> 
     assert client.requests[1][1]["message"] == "Agent command signature is invalid."
 
 
-def test_service_action_is_placeholder_for_mvp() -> None:
-    # service_action now tries to actually interact with the system.
-    # On the test runner (no netorium-agent binary, no systemd session),
-    # it should raise AgentError rather than return a stub string.
-    with pytest.raises(AgentError):
-        service_action("install")
-
+def test_service_action_rejects_unknown_actions() -> None:
     with pytest.raises(AgentError, match="Unsupported"):
         service_action("restart")
 

@@ -47,6 +47,11 @@ def test_agent_enroll_does_not_print_tokens(
         )
 
     monkeypatch.setattr(agent_module, "enroll_agent", fake_enroll_agent)
+    monkeypatch.setattr(
+        agent_module,
+        "try_provision_agent_background_service",
+        lambda: None,
+    )
 
     result = runner.invoke(
         app,
@@ -119,7 +124,7 @@ def test_agent_status_and_run_before_enroll(tmp_path: Path) -> None:
 
     assert status_result.exit_code == 0
     assert "no" in status_result.output
-    assert "netorium-agent enroll" in status_result.output
+    assert "netorium agent enroll" in status_result.output
     assert run_result.exit_code == 1
     assert "not enrolled" in run_result.output
 

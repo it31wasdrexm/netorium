@@ -68,6 +68,18 @@ def uninstall_controller_service() -> str:
     )
 
 
+def try_provision_controller_background_service(
+    *,
+    host: str = "0.0.0.0",
+    port: int = 8765,
+) -> str | None:
+    """Install and start the controller background service after initialization."""
+    try:
+        return install_controller_service(host=host, port=port)
+    except ControllerServiceError:
+        return None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Linux – systemd
 # ──────────────────────────────────────────────────────────────────────────────

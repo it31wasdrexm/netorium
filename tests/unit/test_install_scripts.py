@@ -64,12 +64,12 @@ def test_agent_installers_delegate_to_main_installers() -> None:
     assert "$RawBaseUrl/get.ps1" in windows
     assert "irm $InstallUrl | iex" in windows
     assert "py -m pip install --user" not in windows
-    assert "netorium-agent enroll" in windows
+    assert "netorium agent enroll" in windows
 
     assert "${RAW_BASE_URL}/get.sh" in linux
     assert 'curl -fsSL "$INSTALL_URL" | bash' in linux
     assert "python3 -m pip install --user" not in linux
-    assert "netorium-agent enroll" in linux
+    assert "netorium agent enroll" in linux
 
 
 def test_install_docs_include_download_commands() -> None:

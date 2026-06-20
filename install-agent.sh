@@ -9,4 +9,4 @@ curl -fsSL "$INSTALL_URL" | bash
 
 echo "Netorium Agent installed."
 echo "Next:"
-echo "  netorium-agent enroll --controller http://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"
+echo "  netorium agent enroll --controller http://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"

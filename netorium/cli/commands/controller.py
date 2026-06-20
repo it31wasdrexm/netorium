@@ -35,6 +35,7 @@ from netorium.services.controller import (
 from netorium.services.controller_service import (
     ControllerServiceError,
     install_controller_service,
+    try_provision_controller_background_service,
     uninstall_controller_service,
 )
 
@@ -89,6 +90,15 @@ def init(
     console.print("Netorium Controller initialized.")
     _render_config(config.host, config.port, status.enrollment_url, status.active_tokens)
 
+    background_message = try_provision_controller_background_service(host=host, port=port)
+    if background_message is not None:
+        console.print(background_message)
+    else:
+        console.print(
+            "Background service was not installed automatically. "
+            "Run: netorium controller install-service"
+        )
+
 
 @controller_app.command("status")
 def status() -> None:
@@ -125,8 +135,15 @@ def start(
     """Start the local controller HTTP process."""
     try:
         database_path = _database_path()
+        controller_status = get_controller_status(database_path)
     except ConfigError as exc:
         _fail(exc)
+
+    if not controller_status.initialized:
+        error_console.print(
+            "[red]Error:[/red] Controller is not initialized. Run `netorium controller init` first."
+        )
+        raise typer.Exit(1)
 
     console.print("Starting Netorium Controller.")
     console.print(f"Listen: http://{host}:{port}")

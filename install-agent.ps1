@@ -8,4 +8,4 @@ irm $InstallUrl | iex
 
 Write-Host "Netorium Agent installed."
 Write-Host "Next:"
-Write-Host "  netorium-agent enroll --controller http://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"
+Write-Host "  netorium agent enroll --controller http://YOUR-CONTROLLER:8765 --token YOUR_TOKEN"

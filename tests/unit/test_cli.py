@@ -37,7 +37,9 @@ def test_help_shows_main_commands() -> None:
     assert "prtg" in result.output
     assert "ad" in result.output
     assert "telegram" in result.output
+    assert "report" in result.output
     assert "audit" in result.output
+    assert "agent" in result.output
     assert "uninstall" in result.output
     assert "unistall" not in result.output
     assert "version" in result.output

@@ -1056,10 +1056,15 @@ def serve_controller(
     host: str = DEFAULT_CONTROLLER_HOST,
     port: int = DEFAULT_CONTROLLER_PORT,
 ) -> None:
+    path = initialize_database(database_path)
+    status = get_controller_status(path)
+    if not status.initialized:
+        raise ControllerNotInitializedError(
+            "Controller is not initialized. Run `netorium controller init` first."
+        )
+
     clean_host = _normalize_host(host)
     clean_port = _normalize_port(port)
-    path = initialize_database(database_path)
-    init_controller(path, host=clean_host, port=clean_port)
     handler = _make_handler(path)
 
     try:

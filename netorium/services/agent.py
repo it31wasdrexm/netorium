@@ -24,6 +24,7 @@ from netorium.services.endpoint_policy import (
     apply_site_policy,
     apply_speed_policy,
 )
+from netorium.services.windows_service import build_sc_create_command
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
@@ -458,13 +459,14 @@ def _windows_service_action(action: str) -> str:
                 f"  Remove:  netorium agent service uninstall"
             )
         else:
-            binpath = f'"{executable}" agent run-loop'
-            _run_service_cmd([
-                "sc", "create", svc,
-                "binPath=", binpath,
-                "start=", "auto",
-                "DisplayName=", "Netorium Agent",
-            ])
+            _run_service_cmd(
+                build_sc_create_command(
+                    svc,
+                    executable,
+                    ["agent", "run-loop"],
+                    display_name="Netorium Agent",
+                )
+            )
             _run_service_cmd(["sc", "start", svc])
             return (
                 f"[Windows/sc.exe] Agent service '{svc}' installed and started.\n"

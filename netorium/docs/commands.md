@@ -70,6 +70,9 @@ notice at startup if a newer release is available.
 netorium controller init
 netorium controller status
 netorium controller start --host 0.0.0.0 --port 8765
+netorium controller install-service
+netorium controller install-service --system
+netorium controller uninstall-service
 netorium controller token create --zone accounting --ttl 24h
 netorium controller agent list
 netorium controller agent command firewall --agent-id AGENT_ID --action block --ip 192.168.1.25 --reason "Policy test"
@@ -97,6 +100,11 @@ Firewall program rules, and per-agent speed-limit set/clear through Windows QoS.
 Real endpoint commands require the agent to run on Windows with administrator
 rights. Windows QoS throttles outbound traffic; reliable download limiting needs
 a router, gateway, or future packet-filter adapter.
+
+`controller install-service` registers a background service on Linux (systemd),
+Windows (sc.exe or NSSM), or macOS (launchd). On Linux, the default user service
+works without root; pass `--system` to install a system-wide unit and let
+Netorium re-exec itself under sudo with the resolved executable path.
 
 ## Policy Shortcuts
 

@@ -7,7 +7,7 @@ Supports:
 
 Usage
 -----
-    netorium controller install-service [--host 0.0.0.0] [--port 8765]
+    netorium controller install-service [--host 0.0.0.0] [--port 8765] [--system]
     netorium controller uninstall-service
 """
 
@@ -20,6 +20,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from netorium.services.windows_service import build_sc_create_command
+
 
 class ControllerServiceError(RuntimeError):
     pass
@@ -29,10 +31,16 @@ class ControllerServiceError(RuntimeError):
 # Public API
 # ──────────────────────────────────────────────────────────────────────────────
 
+def resolve_netorium_executable() -> str:
+    """Return the absolute path to the Netorium CLI executable."""
+    return _find_executable("netorium")
+
+
 def install_controller_service(
     *,
     host: str = "0.0.0.0",
     port: int = 8765,
+    system: bool = False,
 ) -> str:
     """Install and enable the Netorium Controller as a persistent background service.
 
@@ -40,7 +48,8 @@ def install_controller_service(
     """
     platform = sys.platform
     if platform.startswith("linux"):
-        return _install_systemd(host=host, port=port)
+        reexec_system_install_if_needed(host=host, port=port, system=system)
+        return _install_systemd(host=host, port=port, system=system)
     if platform == "darwin":
         return _install_launchd(host=host, port=port)
     if platform.startswith("win"):
@@ -75,9 +84,39 @@ def try_provision_controller_background_service(
 ) -> str | None:
     """Install and start the controller background service after initialization."""
     try:
-        return install_controller_service(host=host, port=port)
+        return install_controller_service(host=host, port=port, system=False)
     except ControllerServiceError:
         return None
+
+
+def reexec_system_install_if_needed(
+    *,
+    host: str,
+    port: int,
+    system: bool,
+) -> None:
+    """Re-exec this process under sudo for a Linux system service install."""
+    if not system or os.geteuid() == 0:
+        return
+
+    executable = resolve_netorium_executable()
+    command = [
+        executable,
+        "controller",
+        "install-service",
+        "--system",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    try:
+        os.execvp("sudo", ["sudo", *command])
+    except FileNotFoundError as exc:
+        raise ControllerServiceError(
+            "sudo was not found. Install sudo or run the install command as root:\n"
+            f"  {executable} controller install-service --system"
+        ) from exc
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -126,12 +165,17 @@ def _systemd_user_unit_content(executable: str, host: str, port: int) -> str:
     """)
 
 
-def _install_systemd(host: str, port: int) -> str:
-    executable = _find_executable("netorium")
+def _install_systemd(host: str, port: int, *, system: bool) -> str:
+    executable = resolve_netorium_executable()
 
-    # Try system-level first (requires root); fall back to user-level.
+    # System units require root. User units are the default for non-root installs.
     is_root = os.geteuid() == 0
-    if is_root:
+    if system and not is_root:
+        raise ControllerServiceError(
+            "System service install requires root privileges. "
+            f"Run: {executable} controller install-service --system"
+        )
+    if is_root or system:
         unit_dir = _SYSTEMD_SYSTEM_DIR
         unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
         content = _systemd_unit_content(executable, host, port)
@@ -164,8 +208,8 @@ def _install_systemd(host: str, port: int) -> str:
             f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
             f"  Remove:  netorium controller uninstall-service\n"
             "\n"
-            "  Tip: Run as root (sudo netorium controller install-service) to install\n"
-            "  a system-wide service that also survives user logout automatically."
+            "  Tip: Install a system-wide service that survives logout with:\n"
+            f"  {executable} controller install-service --system"
         )
 
 
@@ -288,11 +332,14 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
 
 def _install_windows_sc(executable: str, host: str, port: int) -> str:
     svc = _WINDOWS_SERVICE_NAME
-    binpath = f'"{executable}" controller start --host {host} --port {port}'
-    _run(["sc", "create", svc,
-          "binPath=", binpath,
-          "start=", "auto",
-          "DisplayName=", "Netorium Controller"])
+    _run(
+        build_sc_create_command(
+            svc,
+            executable,
+            ["controller", "start", "--host", host, "--port", str(port)],
+            display_name="Netorium Controller",
+        )
+    )
     _run(["sc", "start", svc])
     return (
         f"[Windows/sc.exe] Service '{svc}' installed and started.\n"

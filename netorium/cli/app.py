@@ -1,5 +1,6 @@
 import platform
 import shlex
+import subprocess
 from typing import Annotated
 
 import typer
@@ -24,6 +25,10 @@ from netorium.cli.commands.zone import zone_app
 from netorium.cli.commands.report import report_app
 from netorium.core.metadata import APP_NAME, get_version
 from netorium.core.settings import default_config_path
+from netorium.services.controller_service import (
+    ControllerServiceError,
+    resolve_netorium_executable,
+)
 from netorium.services.update_notifications import StartupUpdateNotice, get_startup_update_notice
 from netorium.services.uninstaller import (
     UninstallError,
@@ -122,9 +127,36 @@ def _run_interactive_shell() -> None:
         if not args:
             continue
 
+        if args[0].lower() == "sudo":
+            _run_interactive_sudo(args)
+            continue
+
         _run_interactive_command(args)
 
     console.print("Leaving Netorium.")
+
+
+def _run_interactive_sudo(args: list[str]) -> None:
+    if len(args) < 2:
+        console.print("[red]Usage:[/] sudo <command> ...")
+        return
+
+    resolved = list(args)
+    if resolved[1].lower() == "netorium":
+        try:
+            resolved[1] = resolve_netorium_executable()
+        except ControllerServiceError as exc:
+            error_console.print(f"[red]Error:[/red] {exc}")
+            return
+
+    try:
+        result = subprocess.run(resolved)
+    except FileNotFoundError:
+        error_console.print(f"[red]Command not found:[/] {resolved[0]}")
+        return
+
+    if result.returncode != 0:
+        error_console.print(f"[red]sudo exited with code {result.returncode}[/]")
 
 
 def _render_interactive_header() -> None:

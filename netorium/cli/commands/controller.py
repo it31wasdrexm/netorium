@@ -607,10 +607,17 @@ def install_service(
         int,
         typer.Option("--port", help="Controller listen port."),
     ] = DEFAULT_CONTROLLER_PORT,
+    system: Annotated[
+        bool,
+        typer.Option(
+            "--system",
+            help="Install a system-wide Linux service (re-execs with sudo when needed).",
+        ),
+    ] = False,
 ) -> None:
     """Install the controller as a system background service (systemd on Linux, Windows Service on Windows)."""
     try:
-        result = install_controller_service(host=host, port=port)
+        result = install_controller_service(host=host, port=port, system=system)
     except (ConfigError, ControllerServiceError) as exc:
         _fail(exc)
 

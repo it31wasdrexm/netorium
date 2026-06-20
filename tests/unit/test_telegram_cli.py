@@ -89,6 +89,33 @@ def test_telegram_start_bot(
     assert "netorium.db" in str(called_args["db_path"])
 
 
+def test_telegram_start_bot_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _write_config(tmp_path)
+    
+    called_args = {}
+    def mock_start(token: str, chat_id: str, db_path: Path) -> None:
+        called_args["token"] = token
+        called_args["chat_id"] = chat_id
+        called_args["db_path"] = db_path
+
+    import netorium.services.telegram_bot
+    monkeypatch.setattr(netorium.services.telegram_bot, "start_telegram_bot", mock_start)
+
+    result = runner.invoke(
+        app,
+        ["telegram", "start", "--token", "999:new-token", "--chat-id", "98765"],
+        env=env,
+    )
+    
+    assert result.exit_code == 0
+    assert called_args["token"] == "999:new-token"
+    assert called_args["chat_id"] == "98765"
+
+
+
 def _write_config(tmp_path: Path) -> dict[str, str]:
     database_path = tmp_path / "state" / "netorium.db"
     config_dir = isolated_config_dir(tmp_path)

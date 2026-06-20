@@ -66,6 +66,29 @@ def test_telegram_test_reports_service_error(
     assert "Telegram request failed" in result.output
 
 
+def test_telegram_start_bot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _write_config(tmp_path)
+    
+    called_args = {}
+    def mock_start(token: str, chat_id: str, db_path: Path) -> None:
+        called_args["token"] = token
+        called_args["chat_id"] = chat_id
+        called_args["db_path"] = db_path
+
+    import netorium.services.telegram_bot
+    monkeypatch.setattr(netorium.services.telegram_bot, "start_telegram_bot", mock_start)
+
+    result = runner.invoke(app, ["telegram", "start"], env=env)
+    
+    assert result.exit_code == 0
+    assert called_args["token"] == "123456:secret-token"
+    assert called_args["chat_id"] == "123456789"
+    assert "netorium.db" in str(called_args["db_path"])
+
+
 def _write_config(tmp_path: Path) -> dict[str, str]:
     database_path = tmp_path / "state" / "netorium.db"
     config_dir = isolated_config_dir(tmp_path)
@@ -78,3 +101,4 @@ def _write_config(tmp_path: Path) -> dict[str, str]:
     config_text = config_text.replace('chat_id = "CHANGE_ME"', 'chat_id = "123456789"')
     (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
     return isolated_user_env(tmp_path)
+

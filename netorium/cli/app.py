@@ -20,6 +20,7 @@ from netorium.cli.commands.prtg import prtg_app
 from netorium.cli.commands.telegram import telegram_app
 from netorium.cli.commands.update import update_app
 from netorium.cli.commands.zone import zone_app
+from netorium.cli.commands.report import report_app
 from netorium.core.metadata import APP_NAME, get_version
 from netorium.core.settings import default_config_path
 from netorium.services.update_notifications import StartupUpdateNotice, get_startup_update_notice
@@ -54,6 +55,7 @@ app.add_typer(firewall_app, name="firewall")
 app.add_typer(prtg_app, name="prtg")
 app.add_typer(ad_app, name="ad")
 app.add_typer(telegram_app, name="telegram")
+app.add_typer(report_app, name="report")
 app.add_typer(audit_app, name="audit")
 
 

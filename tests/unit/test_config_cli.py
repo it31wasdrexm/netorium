@@ -47,3 +47,22 @@ def test_config_validate_reports_missing_config(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "Config file not found" in result.output
+
+
+def test_config_backup(tmp_path: Path) -> None:
+    import zipfile
+    env = isolated_user_env(tmp_path)
+    runner.invoke(app, ["config", "init"], env=env)
+    
+    backup_file = tmp_path / "my_backup.zip"
+    result = runner.invoke(app, ["config", "backup", str(backup_file)], env=env)
+    
+    assert result.exit_code == 0
+    assert "Backup successfully created" in result.output
+    assert backup_file.exists()
+    
+    # Verify backup contents
+    with zipfile.ZipFile(backup_file, "r") as zf:
+        namelist = zf.namelist()
+        assert "config.toml" in namelist
+

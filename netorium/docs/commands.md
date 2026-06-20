@@ -40,7 +40,12 @@ netorium config path
 netorium config init
 netorium config show
 netorium config validate
+netorium config backup netorium_backup.zip
+netorium config backup /path/to/backup/directory
 ```
+
+The `backup` subcommand creates a ZIP archive containing the database and config
+files. Pass a filename ending in `.zip` or a directory path as the destination.
 
 ## Updates
 
@@ -209,10 +214,17 @@ configured bind password.
 
 ```bash
 netorium telegram test
+netorium telegram start
+netorium telegram start --token BOT_TOKEN
 ```
 
 The Telegram test command checks the configured bot token through Telegram
 `getMe`. It does not print the bot token or chat id.
+
+`netorium telegram start` runs the Telegram bot in the foreground, listening for
+admin commands and monitoring traffic anomalies. The bot supports commands like
+`/status`, `/agents`, `/traffic`, `/block_site`, `/limit_speed`, and more.
+Press Ctrl+C to stop the bot.
 
 ## Audit
 
@@ -222,6 +234,21 @@ netorium audit list --limit 20
 ```
 
 Audit output is local and read-only from the CLI.
+
+## Reports
+
+```bash
+netorium report traffic
+netorium report traffic --threshold 500
+netorium report anomalies
+netorium report anomalies --threshold 500
+netorium report export --format csv --output traffic.csv
+netorium report export --format json --output traffic.json
+```
+
+Report commands show real-time traffic usage and anomaly detection for all
+enrolled devices. The `--threshold` option sets the anomaly threshold in
+megabytes (default: 1000 MB). Export commands save reports in CSV or JSON format.
 
 ## Planned MVP Areas
 

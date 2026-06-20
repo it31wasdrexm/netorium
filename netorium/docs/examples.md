@@ -150,6 +150,33 @@ Test Telegram bot settings after replacing the placeholder credentials:
 netorium telegram test
 ```
 
+Start the Telegram bot to listen for admin commands and monitor traffic:
+
+```bash
+netorium telegram start
+netorium telegram start --token BOT_TOKEN
+```
+
+View real-time traffic usage and detect anomalies:
+
+```bash
+netorium report traffic
+netorium report anomalies --threshold 500
+```
+
+Export traffic reports to a file:
+
+```bash
+netorium report export --format csv --output traffic.csv
+netorium report export --format json --output traffic.json
+```
+
+Back up the database and config files:
+
+```bash
+netorium config backup netorium_backup.zip
+```
+
 Show installation instructions:
 
 ```bash

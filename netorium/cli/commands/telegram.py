@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Annotated
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -13,7 +16,7 @@ from netorium.services.telegram_client import (
 )
 
 telegram_app = typer.Typer(
-    help="Test Telegram bot integration.",
+    help="Manage and test Telegram bot integration.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -34,6 +37,32 @@ def test_connection() -> None:
     _render_result(result)
 
 
+@telegram_app.command("start")
+def start_bot(
+    token: Annotated[
+        str | None,
+        typer.Option("--token", "-t", help="Telegram Bot API token. Overrides configuration."),
+    ] = None,
+) -> None:
+    """Start the Telegram bot in the foreground to listen for commands and report traffic anomalies."""
+    try:
+        settings = load_settings()
+        bot_token = token or settings.telegram.bot_token
+        chat_id = settings.telegram.chat_id
+        db_path = Path(settings.app.database_path).expanduser()
+
+        if bot_token == "CHANGE_ME" or not bot_token.strip():
+            raise ConfigError("Telegram bot token is not configured. Use --token option or update config.toml.")
+        if chat_id == "CHANGE_ME" or not chat_id.strip():
+            raise ConfigError("Telegram chat_id is not configured. Update config.toml.")
+
+        from netorium.services.telegram_bot import start_telegram_bot
+        start_telegram_bot(token=bot_token, chat_id=chat_id, db_path=db_path)
+    except (ConfigError, TelegramError) as exc:
+        error_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+
 def _load_telegram_config() -> TelegramConfig:
     settings = load_settings()
     return TelegramConfig(
@@ -50,3 +79,4 @@ def _render_result(result: TelegramTestResult) -> None:
     table.add_row("Message", result.message)
     console.print(table)
     console.print("Telegram connection OK")
+

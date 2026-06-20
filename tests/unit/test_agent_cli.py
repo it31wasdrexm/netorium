@@ -124,12 +124,16 @@ def test_agent_status_and_run_before_enroll(tmp_path: Path) -> None:
     assert "not enrolled" in run_result.output
 
 
-def test_agent_service_and_update_commands() -> None:
+def test_agent_service_and_update_commands(monkeypatch) -> None:
+    import netorium.cli.agent as agent_cli_module
+
+    monkeypatch.setattr(agent_cli_module, "service_action", lambda action: f"Service {action} OK")
+
     service_result = runner.invoke(app, ["service", "install"])
     update_result = runner.invoke(app, ["update", "check"])
 
     assert service_result.exit_code == 0
-    assert "foreground heartbeat skeleton" in service_result.output
+    assert "Service install OK" in service_result.output
     assert update_result.exit_code == 0
     assert "Netorium Agent" in update_result.output
     assert "netorium update show" in update_result.output

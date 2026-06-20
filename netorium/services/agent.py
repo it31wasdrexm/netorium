@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import os
+import shutil
 import socket
+import subprocess
+import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -230,14 +235,275 @@ def run_agent_once(
     )
 
 
+def run_agent_loop(
+    state_path: str | Path | None = None,
+    *,
+    client: HttpClient | None = None,
+    interval_seconds: float = 15.0,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+) -> None:
+    """Run the agent heartbeat loop forever (used by the background service)."""
+    import time
+
+    while True:
+        try:
+            run_agent_once(state_path, client=client, timeout=timeout)
+        except AgentError:
+            pass  # Log silently; the service manager will restart on crash
+        time.sleep(interval_seconds)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Service management
+# ──────────────────────────────────────────────────────────────────────────────
+
+_SYSTEMD_SERVICE_NAME = "netorium-agent"
+_SYSTEMD_USER_DIR = Path("~/.config/systemd/user").expanduser()
+_LAUNCHD_LABEL = "com.netorium.agent"
+_LAUNCHD_PLIST_DIR = Path("~/Library/LaunchAgents").expanduser()
+_WINDOWS_SERVICE_NAME = "NetoriumAgent"
+
+
 def service_action(action: str) -> str:
+    """Install, start, stop, or uninstall the agent background service."""
     clean_action = _normalize_text(action, "Service action")
-    if clean_action not in {"install", "start", "stop"}:
+    if clean_action not in {"install", "start", "stop", "uninstall"}:
         raise AgentError(f"Unsupported service action: {clean_action}")
-    return (
-        f"Agent service {clean_action} is not installed by this MVP yet. "
-        "Use `netorium-agent run` for the foreground heartbeat skeleton."
+
+    platform = sys.platform
+    if platform.startswith("linux"):
+        return _systemd_action(clean_action)
+    if platform == "darwin":
+        return _launchd_action(clean_action)
+    if platform.startswith("win"):
+        return _windows_service_action(clean_action)
+    raise AgentError(
+        f"Unsupported platform for service management: {platform}. "
+        "Supported: Linux (systemd), macOS (launchd), Windows (sc.exe/NSSM)."
     )
+
+
+# ─── Helpers for combined binary ─────────────────────────────────────────────
+
+def _find_netorium_executable() -> str:
+    """Find the netorium executable (the single combined binary)."""
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    for name in ("netorium",):
+        path = shutil.which(name)
+        if path:
+            return path
+    candidate = Path(sys.executable).parent / "netorium"
+    if candidate.exists():
+        return str(candidate)
+    candidate_exe = Path(sys.executable).parent / "netorium.exe"
+    if candidate_exe.exists():
+        return str(candidate_exe)
+    raise AgentError(
+        "Could not find the 'netorium' executable. "
+        "Make sure Netorium is installed and on your PATH."
+    )
+
+
+# ─── Linux / systemd ──────────────────────────────────────────────────────────
+
+def _systemd_unit_content(executable: str) -> str:
+    return textwrap.dedent(f"""\
+        [Unit]
+        Description=Netorium Agent
+        After=network.target
+
+        [Service]
+        Type=simple
+        ExecStart={executable} agent run-loop
+        Restart=always
+        RestartSec=15
+
+        [Install]
+        WantedBy=default.target
+    """)
+
+
+def _systemd_action(action: str) -> str:
+    executable = _find_netorium_executable()
+    unit_dir = _SYSTEMD_USER_DIR
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
+
+    if action == "install":
+        unit_file.write_text(_systemd_unit_content(executable), encoding="utf-8")
+        _run_service_cmd(["systemctl", "--user", "daemon-reload"])
+        _run_service_cmd(["systemctl", "--user", "enable", "--now", _SYSTEMD_SERVICE_NAME])
+        username = os.environ.get("USER") or ""
+        if username:
+            _run_service_cmd_optional(["loginctl", "enable-linger", username])
+        return (
+            f"[systemd --user] Agent service installed: {unit_file}\n"
+            f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
+            f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
+            f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
+            f"  Remove:  netorium agent service uninstall"
+        )
+
+    if action == "start":
+        _run_service_cmd(["systemctl", "--user", "start", _SYSTEMD_SERVICE_NAME])
+        return f"[systemd --user] Agent service started: {_SYSTEMD_SERVICE_NAME}"
+
+    if action == "stop":
+        _run_service_cmd(["systemctl", "--user", "stop", _SYSTEMD_SERVICE_NAME])
+        return f"[systemd --user] Agent service stopped: {_SYSTEMD_SERVICE_NAME}"
+
+    if action == "uninstall":
+        _run_service_cmd_optional(["systemctl", "--user", "stop", _SYSTEMD_SERVICE_NAME])
+        _run_service_cmd_optional(["systemctl", "--user", "disable", _SYSTEMD_SERVICE_NAME])
+        if unit_file.exists():
+            unit_file.unlink()
+        _run_service_cmd_optional(["systemctl", "--user", "daemon-reload"])
+        return f"[systemd --user] Agent service removed: {unit_file}"
+
+    raise AgentError(f"Unknown service action: {action}")
+
+
+# ─── macOS / launchd ──────────────────────────────────────────────────────────
+
+def _launchd_plist_content(executable: str) -> str:
+    return textwrap.dedent(f"""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>{_LAUNCHD_LABEL}</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>{executable}</string>
+                <string>agent</string>
+                <string>run-loop</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>KeepAlive</key>
+            <true/>
+            <key>StandardOutPath</key>
+            <string>/tmp/netorium-agent.log</string>
+            <key>StandardErrorPath</key>
+            <string>/tmp/netorium-agent.err</string>
+        </dict>
+        </plist>
+    """)
+
+
+def _launchd_action(action: str) -> str:
+    executable = _find_netorium_executable()
+    _LAUNCHD_PLIST_DIR.mkdir(parents=True, exist_ok=True)
+    plist_file = _LAUNCHD_PLIST_DIR / f"{_LAUNCHD_LABEL}.plist"
+
+    if action == "install":
+        plist_file.write_text(_launchd_plist_content(executable), encoding="utf-8")
+        _run_service_cmd(["launchctl", "load", "-w", str(plist_file)])
+        return (
+            f"[launchd] Agent Launch Agent installed: {plist_file}\n"
+            f"  Status:  launchctl list | grep netorium\n"
+            f"  Logs:    tail -f /tmp/netorium-agent.log\n"
+            f"  Remove:  netorium agent service uninstall"
+        )
+    if action == "start":
+        _run_service_cmd(["launchctl", "start", _LAUNCHD_LABEL])
+        return "[launchd] Agent service started."
+    if action == "stop":
+        _run_service_cmd(["launchctl", "stop", _LAUNCHD_LABEL])
+        return "[launchd] Agent service stopped."
+    if action == "uninstall":
+        _run_service_cmd_optional(["launchctl", "unload", "-w", str(plist_file)])
+        if plist_file.exists():
+            plist_file.unlink()
+        return f"[launchd] Agent Launch Agent removed: {plist_file}"
+    raise AgentError(f"Unknown service action: {action}")
+
+
+# ─── Windows ──────────────────────────────────────────────────────────────────
+
+def _windows_service_action(action: str) -> str:
+    executable = _find_netorium_executable()
+    svc = _WINDOWS_SERVICE_NAME
+    nssm = shutil.which("nssm")
+
+    if action == "install":
+        if nssm:
+            _run_service_cmd([nssm, "install", svc, executable, "agent", "run-loop"])
+            _run_service_cmd([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
+            _run_service_cmd([nssm, "set", svc, "AppStdout",
+                              r"C:\ProgramData\Netorium\agent.log"])
+            _run_service_cmd([nssm, "set", svc, "AppStderr",
+                              r"C:\ProgramData\Netorium\agent.err"])
+            _run_service_cmd([nssm, "start", svc])
+            return (
+                f"[Windows/NSSM] Agent service '{svc}' installed and started.\n"
+                f"  Status:  sc query {svc}\n"
+                f"  Logs:    C:\\ProgramData\\Netorium\\agent.log\n"
+                f"  Remove:  netorium agent service uninstall"
+            )
+        else:
+            binpath = f'"{executable}" agent run-loop'
+            _run_service_cmd([
+                "sc", "create", svc,
+                "binPath=", binpath,
+                "start=", "auto",
+                "DisplayName=", "Netorium Agent",
+            ])
+            _run_service_cmd(["sc", "start", svc])
+            return (
+                f"[Windows/sc.exe] Agent service '{svc}' installed and started.\n"
+                f"  Status:  sc query {svc}\n"
+                f"  Remove:  netorium agent service uninstall\n"
+                "  Tip: Install NSSM (https://nssm.cc) for better log capture."
+            )
+
+    if action == "start":
+        if nssm:
+            _run_service_cmd([nssm, "start", svc])
+        else:
+            _run_service_cmd(["sc", "start", svc])
+        return f"[Windows] Agent service '{svc}' started."
+
+    if action == "stop":
+        if nssm:
+            _run_service_cmd([nssm, "stop", svc])
+        else:
+            _run_service_cmd(["sc", "stop", svc])
+        return f"[Windows] Agent service '{svc}' stopped."
+
+    if action == "uninstall":
+        if nssm:
+            _run_service_cmd_optional([nssm, "stop", svc])
+            _run_service_cmd_optional([nssm, "remove", svc, "confirm"])
+        else:
+            _run_service_cmd_optional(["sc", "stop", svc])
+            _run_service_cmd_optional(["sc", "delete", svc])
+        return f"[Windows] Agent service '{svc}' removed."
+
+    raise AgentError(f"Unknown service action: {action}")
+
+
+# ─── Service command helpers ─────────────────────────────────────────────────
+
+def _run_service_cmd(cmd: list[str]) -> None:
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise AgentError(f"Command not found: {cmd[0]}") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        raise AgentError(f"Command failed: {' '.join(cmd)}\n{stderr}") from exc
+
+
+def _run_service_cmd_optional(cmd: list[str]) -> None:
+    """Run a command, ignoring errors (used for cleanup steps)."""
+    try:
+        subprocess.run(cmd, check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        pass
 
 
 def _execute_agent_command(state: AgentState, command: dict[str, Any]) -> AgentCommandExecution:

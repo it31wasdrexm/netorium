@@ -32,6 +32,11 @@ from netorium.services.controller import (
     list_agents,
     serve_controller,
 )
+from netorium.services.controller_service import (
+    ControllerServiceError,
+    install_controller_service,
+    uninstall_controller_service,
+)
 
 controller_app = typer.Typer(
     help="Run the local Netorium controller for office agents.",
@@ -138,7 +143,10 @@ def start(
 
 @token_app.command("create")
 def token_create(
-    zone: Annotated[str, typer.Option("--zone", help="Zone assigned during enrollment.")],
+    zone: Annotated[
+        str,
+        typer.Option("--zone", help="Zone assigned during enrollment (optional, leave empty for no zone)."),
+    ] = "",
     ttl: Annotated[
         str,
         typer.Option("--ttl", help="Token lifetime, for example 30m, 24h, or 7d."),
@@ -166,7 +174,7 @@ def token_create(
     table.add_column("Value")
     table.add_row("Token ID", token.token_id)
     table.add_row("Purpose", token.purpose)
-    table.add_row("Zone", token.zone)
+    table.add_row("Zone", token.zone or "(all zones)")
     table.add_row("Expires", token.expires_at)
     table.add_row("Controller", status.enrollment_url or "-")
     console.print(table)
@@ -410,7 +418,7 @@ def policy_list(
 def policy_ip(
     agent_target: Annotated[
         str,
-        typer.Argument(help="Agent ID, hostname, or all."),
+        typer.Argument(help="Agent ID, hostname, 'all', or 'zone:<name>'."),
     ],
     ip_address: Annotated[str, typer.Argument(help="Target IP address.")],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
@@ -443,7 +451,7 @@ def policy_ip(
 def policy_site(
     agent_target: Annotated[
         str,
-        typer.Argument(help="Agent ID, hostname, or all."),
+        typer.Argument(help="Agent ID, hostname, 'all', or 'zone:<name>'."),
     ],
     domain: Annotated[str, typer.Argument(help="Domain or URL.")],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
@@ -477,7 +485,7 @@ def policy_site(
 def policy_app_command(
     agent_target: Annotated[
         str,
-        typer.Argument(help="Agent ID, hostname, or all."),
+        typer.Argument(help="Agent ID, hostname, 'all', or 'zone:<name>'."),
     ],
     executable: Annotated[str, typer.Argument(help="Executable name or full path.")],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
@@ -510,7 +518,7 @@ def policy_app_command(
 def policy_speed(
     agent_target: Annotated[
         str,
-        typer.Argument(help="Agent ID, hostname, or all."),
+        typer.Argument(help="Agent ID, hostname, 'all', or 'zone:<name>'."),
     ],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
     download_kbps: Annotated[
@@ -547,7 +555,7 @@ def policy_speed(
 def policy_clear_speed(
     agent_target: Annotated[
         str,
-        typer.Argument(help="Agent ID, hostname, or all."),
+        typer.Argument(help="Agent ID, hostname, 'all', or 'zone:<name>'."),
     ],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
     real: Annotated[
@@ -570,6 +578,37 @@ def policy_clear_speed(
         _fail(exc)
 
     _render_agent_commands(result)
+
+
+@controller_app.command("install-service")
+def install_service(
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Controller listen host."),
+    ] = DEFAULT_CONTROLLER_HOST,
+    port: Annotated[
+        int,
+        typer.Option("--port", help="Controller listen port."),
+    ] = DEFAULT_CONTROLLER_PORT,
+) -> None:
+    """Install the controller as a system background service (systemd on Linux, Windows Service on Windows)."""
+    try:
+        result = install_controller_service(host=host, port=port)
+    except (ConfigError, ControllerServiceError) as exc:
+        _fail(exc)
+
+    console.print(result)
+
+
+@controller_app.command("uninstall-service")
+def uninstall_service() -> None:
+    """Uninstall the controller system background service."""
+    try:
+        result = uninstall_controller_service()
+    except (ConfigError, ControllerServiceError) as exc:
+        _fail(exc)
+
+    console.print(result)
 
 
 agent_app.add_typer(agent_command_app, name="command")

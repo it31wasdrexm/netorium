@@ -11,6 +11,7 @@ from netorium.services.agent import (
     AgentError,
     enroll_agent,
     get_agent_status,
+    run_agent_loop,
     run_agent_once,
     service_action,
 )
@@ -96,7 +97,7 @@ def status() -> None:
 
 @app.command()
 def run() -> None:
-    """Run the endpoint agent in the foreground."""
+    """Run the endpoint agent in the foreground (one heartbeat)."""
     try:
         result = run_agent_once()
     except AgentError as exc:
@@ -115,22 +116,54 @@ def run() -> None:
         console.print(f"{command_result.command_id}: {command_result.status} - {command_result.message}")
 
 
+@app.command("run-loop", hidden=True)
+def run_loop(
+    interval: Annotated[
+        float,
+        typer.Option("--interval", help="Heartbeat interval in seconds."),
+    ] = 15.0,
+) -> None:
+    """Run the agent heartbeat loop continuously (used by background service)."""
+    try:
+        run_agent_loop(interval_seconds=interval)
+    except AgentError as exc:
+        _fail(exc)
+
+
 @service_app.command("install")
 def service_install() -> None:
-    """Prepare service installation guidance."""
-    console.print(service_action("install"))
+    """Install the agent as a system background service (start at boot)."""
+    try:
+        console.print(service_action("install"))
+    except AgentError as exc:
+        _fail(exc)
+
+
+@service_app.command("uninstall")
+def service_uninstall() -> None:
+    """Uninstall the agent background service."""
+    try:
+        console.print(service_action("uninstall"))
+    except AgentError as exc:
+        _fail(exc)
 
 
 @service_app.command("start")
 def service_start() -> None:
-    """Prepare service start guidance."""
-    console.print(service_action("start"))
+    """Start the agent background service."""
+    try:
+        console.print(service_action("start"))
+    except AgentError as exc:
+        _fail(exc)
 
 
 @service_app.command("stop")
 def service_stop() -> None:
-    """Prepare service stop guidance."""
-    console.print(service_action("stop"))
+    """Stop the agent background service."""
+    try:
+        console.print(service_action("stop"))
+    except AgentError as exc:
+        _fail(exc)
 
 
 @update_app.command("check")

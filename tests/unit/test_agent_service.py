@@ -459,7 +459,11 @@ def test_run_agent_once_rejects_unsigned_or_tampered_command(tmp_path: Path) -> 
 
 
 def test_service_action_is_placeholder_for_mvp() -> None:
-    assert "foreground heartbeat skeleton" in service_action("install")
+    # service_action now tries to actually interact with the system.
+    # On the test runner (no netorium-agent binary, no systemd session),
+    # it should raise AgentError rather than return a stub string.
+    with pytest.raises(AgentError):
+        service_action("install")
 
     with pytest.raises(AgentError, match="Unsupported"):
         service_action("restart")

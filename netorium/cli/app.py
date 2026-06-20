@@ -57,6 +57,7 @@ app.add_typer(ad_app, name="ad")
 app.add_typer(telegram_app, name="telegram")
 app.add_typer(report_app, name="report")
 app.add_typer(audit_app, name="audit")
+app.add_typer(agent_app, name="agent")
 
 
 def _parse_interactive_line(line: str) -> list[str]:

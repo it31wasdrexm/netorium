@@ -63,7 +63,7 @@ class ControllerStatus:
 class AgentRecord:
     agent_id: str
     hostname: str
-    zone: str
+    zone: str  # empty string means no zone
     enrolled_at: str
     last_seen_at: str | None
 
@@ -251,6 +251,14 @@ def resolve_agent_targets(
     database_path: str | Path,
     selector: str,
 ) -> list[AgentRecord]:
+    """Resolve selector to a list of AgentRecord.
+
+    Supported selector formats:
+    - ``all`` or ``*``       – every enrolled agent
+    - ``zone:accounting``    – every agent whose zone equals "accounting"
+    - ``agt_abc123``         – exact agent ID
+    - ``pc-hostname``        – agent hostname (must be unique)
+    """
     clean_selector = selector.strip()
     if not clean_selector:
         raise ControllerError("Agent target cannot be empty.")
@@ -260,6 +268,19 @@ def resolve_agent_targets(
         if not agents:
             raise ControllerError("No agents enrolled yet.")
         return agents
+
+    # Zone selector: zone:<name>
+    if clean_selector.lower().startswith("zone:"):
+        zone_name = clean_selector[5:].strip().lower()
+        if not zone_name:
+            raise ControllerError("Zone name cannot be empty in zone: selector.")
+        zone_matches = [a for a in agents if a.zone.lower() == zone_name]
+        if not zone_matches:
+            raise ControllerError(
+                f"No agents found in zone '{zone_name}'. "
+                "Use `netorium policy agents` to list enrolled agents and their zones."
+            )
+        return zone_matches
 
     for agent in agents:
         if agent.agent_id == clean_selector:
@@ -277,7 +298,8 @@ def resolve_agent_targets(
         )
 
     raise ControllerError(
-        f"Agent was not found: {clean_selector}. Use agent ID, hostname, or all."
+        f"Agent was not found: {clean_selector}. "
+        "Use agent ID, hostname, 'all', or 'zone:<name>'."
     )
 
 
@@ -675,13 +697,13 @@ def _enqueue_agent_command(
 def create_enrollment_token(
     database_path: str | Path,
     *,
-    zone: str,
+    zone: str = "",
     ttl: str = "24h",
     purpose: str = TOKEN_PURPOSE_ENROLL,
 ) -> EnrollmentToken:
     path = initialize_database(database_path)
     get_controller_config(path)
-    clean_zone = _normalize_text(zone, "Zone")
+    clean_zone = _normalize_optional_zone(zone)
     clean_purpose = _normalize_text(purpose, "Token purpose")
     ttl_delta = parse_ttl(ttl)
     timestamp = _utc_timestamp()
@@ -1398,6 +1420,11 @@ def _normalize_text(value: str, label: str) -> str:
     if not clean_value:
         raise ControllerError(f"{label} cannot be empty.")
     return clean_value
+
+
+def _normalize_optional_zone(value: str) -> str:
+    """Normalize zone name. Empty string is valid (meaning 'no zone / global')."""
+    return value.strip()
 
 
 def _client_host(host: str) -> str:

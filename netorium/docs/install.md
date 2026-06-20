@@ -124,30 +124,44 @@ Python installed.
 
 ## GitHub Install
 
+Short one-liners:
+
 Linux / macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh | bash
-```
-
-To install from another fork or repository:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh \
-  | NETORIUM_GITHUB_REPO=OWNER/REPO bash
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
+irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/get.ps1 | iex
+```
+
+These short installers download the full installer, show a progress UI, detect
+updates when `netorium` is already installed, and fall back to the standalone
+release binary when Python 3.11+ or `pipx` is not available.
+
+Full installer URLs still work:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh | bash
+```
+
+```powershell
 irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1 | iex
 ```
 
 To install from another fork or repository:
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh \
+  | NETORIUM_GITHUB_REPO=OWNER/REPO bash
+```
+
 ```powershell
 $env:NETORIUM_GITHUB_REPO = "OWNER/REPO"
-irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/get.ps1 | iex
 ```
 
 ## PyPI Install
@@ -155,12 +169,12 @@ irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1 | i
 After the package is published to PyPI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh | NETORIUM_INSTALL_SOURCE=pypi bash
+curl -fsSL https://raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh | NETORIUM_INSTALL_SOURCE=pypi bash
 ```
 
 ```powershell
 $env:NETORIUM_INSTALL_SOURCE = "pypi"
-irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/it31wasdrexm/netorium/main/get.ps1 | iex
 ```
 
 ## Windows Installer Behavior
@@ -170,8 +184,8 @@ installed, it looks for Python 3.11+ through `py -3`, `python`, then `python3`
 and installs Netorium into a dedicated user virtual environment.
 
 If neither `pipx` nor Python 3.11+ is installed, the default GitHub installer
-downloads the latest standalone Windows executable from GitHub Releases,
-installs it as:
+downloads the latest standalone executable from GitHub Releases. On Windows it
+installs as:
 
 ```text
 %LOCALAPPDATA%\Netorium\bin\netorium.exe
@@ -180,6 +194,9 @@ installs it as:
 and adds that directory to the current user's `PATH`. The release may publish
 the executable as `netorium-windows-x64.exe` or `netorium.exe`; the installer
 accepts both names.
+
+On Linux and macOS the installer downloads `netorium-linux-x64` or the matching
+macOS asset into `~/.local/bin/netorium` when Python is unavailable.
 
 ## Docker
 

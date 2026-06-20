@@ -1,5 +1,6 @@
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from netorium.core.metadata import get_version
@@ -37,15 +38,25 @@ def check() -> None:
 
     if info.is_update_available:
         platform_instructions = build_platform_install_instructions(_download_instructions())
-        console.print(f"Update available: {info.latest_version}")
-        console.print(f"Current version: {info.current_version}")
-        console.print(f"Platform: {platform_instructions.platform_name}")
-        console.print(f"Run: {platform_instructions.install_command}")
-        console.print(f"Standalone: {platform_instructions.standalone_command}")
-        if platform_instructions.standalone_asset is not None:
-            console.print(f"Standalone asset: {platform_instructions.standalone_asset}")
+        console.print(
+            Panel.fit(
+                f"[bold yellow]Update available:[/] {info.latest_version}\n"
+                f"Current version: {info.current_version}\n"
+                f"Platform: {platform_instructions.platform_name}\n"
+                f"Run: [bold]{platform_instructions.install_command}[/]\n"
+                f"Standalone: {platform_instructions.standalone_command}\n"
+                + (
+                    f"Standalone asset: {platform_instructions.standalone_asset}\n"
+                    if platform_instructions.standalone_asset is not None
+                    else ""
+                )
+                +
+                f"Release: {info.release_url}",
+                title="Netorium Update",
+                border_style="yellow",
+            )
+        )
         console.print(f"Package manager: {info.install_command}")
-        console.print(f"Release: {info.release_url}")
         return
 
     console.print(f"Netorium CLI is up to date: {info.current_version}")
@@ -87,20 +98,31 @@ def show() -> None:
 def install() -> None:
     """Show safe manual update instructions."""
     info, error = _try_update_check()
-    console.print("Automatic installation is not enabled yet.")
-    if error is not None:
-        console.print(f"[yellow]Update check unavailable:[/] {error}")
-    elif info is not None and info.is_update_available:
-        console.print(f"Latest version: {info.latest_version}")
-        console.print(f"Release: {info.release_url}")
-
-    console.print("Run one of these commands manually:")
     platform_instructions = build_platform_install_instructions(_download_instructions())
-    console.print(f"  {platform_instructions.install_command}")
-    console.print(f"  {platform_instructions.standalone_command}")
+    body_lines = [
+        "Run one of these commands in a new terminal:",
+        f"[bold]{platform_instructions.install_command}[/]",
+        platform_instructions.standalone_command,
+    ]
     if info is not None:
-        console.print(f"  {info.install_command}")
-    console.print(f"  python -m pip install --upgrade {DEFAULT_PACKAGE_NAME}")
+        body_lines.append(info.install_command)
+    body_lines.append(f"python -m pip install --upgrade {DEFAULT_PACKAGE_NAME}")
+
+    if error is not None:
+        body_lines.insert(0, f"[yellow]Update check unavailable:[/] {error}")
+    elif info is not None and info.is_update_available:
+        body_lines.insert(0, f"Latest version: [bold]{info.latest_version}[/]")
+        body_lines.insert(1, f"Release: {info.release_url}")
+    else:
+        body_lines.insert(0, "Reinstall the latest Netorium CLI with the command below.")
+
+    console.print(
+        Panel.fit(
+            "\n".join(body_lines),
+            title="Netorium Update Install",
+            border_style="cyan",
+        )
+    )
     _render_download_instructions(_download_instructions())
 
 

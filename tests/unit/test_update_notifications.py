@@ -87,6 +87,6 @@ def test_startup_notice_returns_platform_command(
     assert notice is not None
     assert notice.info.latest_version == "0.2.0"
     assert notice.platform.platform_name == "Windows"
-    assert "install.ps1" in notice.platform.install_command
+    assert "get.ps1" in notice.platform.install_command
     assert "netorium-windows-x64.exe" in notice.platform.standalone_command
     assert client.urls == ["https://api.github.com/repos/it31wasdrexm/netorium/releases/latest"]

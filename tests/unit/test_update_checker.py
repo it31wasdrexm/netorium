@@ -107,8 +107,8 @@ def test_download_instructions_include_release_assets_and_docker() -> None:
     instructions = build_download_instructions(repo=PLACEHOLDER_REPO)
 
     assert instructions.release_url == "https://github.com/it31wasdrexm/netorium/releases/latest"
-    assert "install.sh" in instructions.linux_macos_installer
-    assert "install.ps1" in instructions.windows_installer
+    assert "get.sh" in instructions.linux_macos_installer
+    assert "get.ps1" in instructions.windows_installer
     assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" == instructions.docker_run
     assert "netorium-windows-x64.exe" in instructions.standalone_assets
 

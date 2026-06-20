@@ -134,8 +134,8 @@ def build_download_instructions(
 
     return DownloadInstructions(
         release_url=release_url,
-        linux_macos_installer=f"curl -fsSL {raw_base_url}/install.sh | bash",
-        windows_installer=f"irm {raw_base_url}/install.ps1 | iex",
+        linux_macos_installer=f"curl -fsSL {raw_base_url}/get.sh | bash",
+        windows_installer=f"irm {raw_base_url}/get.ps1 | iex",
         pypi_install=f"pipx install --force {package_name}",
         docker_run=f"docker run --rm -it {docker_image}",
         docker_build="docker build -t netorium-cli .",

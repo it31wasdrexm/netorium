@@ -26,7 +26,7 @@ def test_update_check_shows_available_release(monkeypatch: pytest.MonkeyPatch) -
     assert "Current version: 0.1.0" in result.output
     assert "Platform: Linux" in result.output
     assert "curl -fsSL" in result.output
-    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh" in result.output
+    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh" in result.output
     assert "netorium-linux" in result.output
     assert "-x64" in result.output
     assert "pipx upgrade netorium-cli" in result.output
@@ -64,9 +64,9 @@ def test_update_install_prints_manual_commands(monkeypatch: pytest.MonkeyPatch) 
     result = runner.invoke(app, ["update", "install"])
 
     assert result.exit_code == 0
-    assert "Automatic installation is not enabled yet." in result.output
+    assert "Netorium Update Install" in result.output
     assert "curl -fsSL" in result.output
-    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh" in result.output
+    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh" in result.output
     assert "pipx upgrade netorium-cli" in result.output
     assert "python -m pip install --upgrade netorium-cli" in result.output
     assert "Download Options" in result.output

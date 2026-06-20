@@ -14,8 +14,19 @@ def test_linux_installer_supports_github_pypi_and_local_modes() -> None:
     assert "pipx install --force" in text
     assert "python3 -m venv" in text
     assert "NETORIUM_VENV_DIR" in text
+    assert "install_standalone_release" in text
+    assert "netorium_print_banner" in text
+    assert "netorium_download" in text
     assert "python3 -m pip install --user --upgrade" not in text
-    assert "standalone release binary or Docker image" in text
+    assert "standalone release" in text
+
+
+def test_short_linux_installer_delegates_to_main_installer() -> None:
+    text = (PROJECT_ROOT / "get.sh").read_text(encoding="utf-8")
+
+    assert "NETORIUM_QUICK_INSTALL=1" in text
+    assert "/install.sh" in text
+    assert "curl -fsSL" in text
 
 
 def test_windows_installer_supports_github_pypi_and_local_modes() -> None:
@@ -35,7 +46,9 @@ def test_windows_installer_supports_github_pypi_and_local_modes() -> None:
     assert "NETORIUM_STANDALONE_URL" in text
     assert "NETORIUM_STANDALONE_ASSET_NAME" in text
     assert "Invoke-RestMethod -Uri $ReleaseApiUrl" in text
-    assert "Invoke-WebRequest -Uri $DownloadUrl" in text
+    assert "Invoke-NetoriumDownload" in text
+    assert "Write-NetoriumBanner" in text
+    assert "releases/latest/download" in text
     assert "netorium-windows-x64.exe" in text
     assert "netorium.exe" in text
     assert "Add-UserPathEntry" in text
@@ -48,12 +61,12 @@ def test_agent_installers_delegate_to_main_installers() -> None:
     windows = (PROJECT_ROOT / "install-agent.ps1").read_text(encoding="utf-8")
     linux = (PROJECT_ROOT / "install-agent.sh").read_text(encoding="utf-8")
 
-    assert "$RawBaseUrl/install.ps1" in windows
+    assert "$RawBaseUrl/get.ps1" in windows
     assert "irm $InstallUrl | iex" in windows
     assert "py -m pip install --user" not in windows
     assert "netorium-agent enroll" in windows
 
-    assert "${RAW_BASE_URL}/install.sh" in linux
+    assert "${RAW_BASE_URL}/get.sh" in linux
     assert 'curl -fsSL "$INSTALL_URL" | bash' in linux
     assert "python3 -m pip install --user" not in linux
     assert "netorium-agent enroll" in linux
@@ -62,13 +75,15 @@ def test_agent_installers_delegate_to_main_installers() -> None:
 def test_install_docs_include_download_commands() -> None:
     text = (PROJECT_ROOT / "netorium" / "docs" / "install.md").read_text(encoding="utf-8")
 
+    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh" in text
+    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/get.ps1" in text
     assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/install.sh" in text
-    assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/install.ps1" in text
     assert "NETORIUM_GITHUB_REPO=OWNER/REPO" in text
     assert "| NETORIUM_INSTALL_SOURCE=pypi bash" in text
+    assert "progress UI" in text
     assert "If `pipx` is not" in text
     assert "`py -3`, `python`, then `python3`" in text
-    assert "downloads the latest standalone Windows executable" in text
+    assert "downloads the latest standalone executable" in text
     assert "netorium-windows-x64.exe" in text
     assert "docker run --rm -it ghcr.io/it31wasdrexm/netorium:latest" in text
     assert "netorium deploy instructions" in text
@@ -123,6 +138,14 @@ def test_local_release_helpers_use_native_asset_names() -> None:
     assert "${LASTEXITCODE}:" in windows
     assert "$LASTEXITCODE:" not in windows
     assert (PROJECT_ROOT / "scripts" / "build-windows.cmd").exists() is False
+
+
+def test_short_windows_installer_delegates_to_main_installer() -> None:
+    text = (PROJECT_ROOT / "get.ps1").read_text(encoding="utf-8")
+
+    assert 'NETORIUM_QUICK_INSTALL = "1"' in text
+    assert "/install.ps1" in text
+    assert "irm $InstallUrl | iex" in text
 
 
 def test_install_docs_document_native_linux_and_windows_release_assets() -> None:

@@ -12,6 +12,73 @@ $BinDir = if ($env:NETORIUM_BIN_DIR) { $env:NETORIUM_BIN_DIR } else { Join-Path 
 $GithubApiBaseUrl = if ($env:NETORIUM_GITHUB_API_BASE_URL) { $env:NETORIUM_GITHUB_API_BASE_URL.TrimEnd("/") } else { "https://api.github.com" }
 $ReleaseApiUrl = if ($env:NETORIUM_RELEASE_API_URL) { $env:NETORIUM_RELEASE_API_URL } else { "$GithubApiBaseUrl/repos/$GithubRepo/releases/latest" }
 $HttpHeaders = @{ "User-Agent" = "netorium-installer" }
+$UpdateMode = if ($env:NETORIUM_UPDATE) { $env:NETORIUM_UPDATE -eq "1" } else { $false }
+$UseColor = -not $env:NETORIUM_NO_COLOR -and $Host.UI.SupportsVirtualTerminal
+
+function Write-NetoriumBanner {
+    if (-not $UseColor) {
+        return
+    }
+
+    Write-Host ""
+    Write-Host " _   _      _             _" -ForegroundColor Cyan
+    Write-Host "| \ | | ___| |_ ___ _ __ (_) ___  _ __" -ForegroundColor Cyan
+    Write-Host "|  \| |/ _ \ __/ _ \ '_ \| |/ _ \| '_ \" -ForegroundColor Cyan
+    Write-Host "| |\  |  __/ ||  __/ | | | | (_) | | | |" -ForegroundColor Cyan
+    Write-Host "|_| \_|\___|\__\___|_| |_|_|\___/|_| |_|" -ForegroundColor Cyan
+    Write-Host "  Network access control CLI" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+function Write-NetoriumStep {
+    param (
+        [string]$Message
+    )
+
+    if ($UseColor) {
+        Write-Host "▸ $Message" -ForegroundColor Cyan
+    } else {
+        Write-Host "-> $Message"
+    }
+}
+
+function Write-NetoriumOk {
+    param (
+        [string]$Message
+    )
+
+    if ($UseColor) {
+        Write-Host "✔ $Message" -ForegroundColor Green
+    } else {
+        Write-Host "OK $Message"
+    }
+}
+
+function Write-NetoriumWarn {
+    param (
+        [string]$Message
+    )
+
+    if ($UseColor) {
+        Write-Host "! $Message" -ForegroundColor Yellow
+    } else {
+        Write-Host "WARN $Message"
+    }
+}
+
+function Invoke-NetoriumSpinner {
+    param (
+        [string]$Message,
+        [scriptblock]$Action
+    )
+
+    Write-NetoriumStep $Message
+    & $Action
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Message failed."
+    }
+    Write-NetoriumOk $Message
+}
 
 function Test-PythonCommand {
     param (
@@ -141,7 +208,7 @@ function Add-UserPathEntry {
             $NewUserPath,
             [System.EnvironmentVariableTarget]::User
         )
-        Write-Host "Added to user PATH: $PathEntry"
+        Write-NetoriumOk "Added to user PATH: $PathEntry"
     }
 
     if (-not (Test-PathEntry -PathValue $env:Path -PathEntry $PathEntry)) {
@@ -157,6 +224,18 @@ function Get-StandaloneDownloadUrl {
     if ($GithubRepo -eq "OWNER/REPO") {
         Write-Error "Netorium GitHub repository is not configured. Set NETORIUM_GITHUB_REPO=owner/repo or NETORIUM_STANDALONE_URL before running this installer."
         exit 1
+    }
+
+    foreach ($AssetName in (Get-StandaloneAssetNames)) {
+        $CandidateUrl = "https://github.com/$GithubRepo/releases/latest/download/$AssetName"
+        try {
+            $Response = Invoke-WebRequest -Uri $CandidateUrl -Method Head -Headers $HttpHeaders -ErrorAction Stop
+            if ($Response.StatusCode -ge 200 -and $Response.StatusCode -lt 400) {
+                return $CandidateUrl
+            }
+        } catch {
+            continue
+        }
     }
 
     try {
@@ -184,6 +263,26 @@ function Get-StandaloneDownloadUrl {
     exit 1
 }
 
+function Invoke-NetoriumDownload {
+    param (
+        [string]$Url,
+        [string]$Destination,
+        [string]$Label
+    )
+
+    Write-NetoriumStep $Label
+    $ProgressPreference = "Continue"
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $Destination -Headers $HttpHeaders -ErrorAction Stop
+    } catch {
+        if (Test-Path $Destination) {
+            Remove-Item $Destination -Force
+        }
+        throw "Could not download Netorium standalone binary from $Url. Details: $($_.Exception.Message)"
+    }
+    Write-NetoriumOk $Label
+}
+
 function Install-StandaloneRelease {
     New-Item -ItemType Directory -Force $BinDir *> $null
     $ResolvedBinDir = (Resolve-Path $BinDir).Path
@@ -191,40 +290,45 @@ function Install-StandaloneRelease {
     $TempPath = "$TargetPath.download"
     $DownloadUrl = Get-StandaloneDownloadUrl
 
-    try {
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -Headers $HttpHeaders -ErrorAction Stop
-        if (-not (Test-Path $TempPath) -or (Get-Item $TempPath).Length -le 0) {
-            Write-Error "Downloaded Netorium standalone binary is empty: $DownloadUrl"
-            exit 1
-        }
-        Move-Item -Path $TempPath -Destination $TargetPath -Force
-    } catch {
-        if (Test-Path $TempPath) {
-            Remove-Item $TempPath -Force
-        }
-        Write-Error "Could not download Netorium standalone binary from $DownloadUrl. Details: $($_.Exception.Message)"
+    Invoke-NetoriumDownload -Url $DownloadUrl -Destination $TempPath -Label "Downloading Netorium CLI"
+    if (-not (Test-Path $TempPath) -or (Get-Item $TempPath).Length -le 0) {
+        Write-Error "Downloaded Netorium standalone binary is empty: $DownloadUrl"
+        exit 1
+    }
+    Move-Item -Path $TempPath -Destination $TargetPath -Force
+
+    $VersionOutput = & $TargetPath version 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Downloaded Netorium binary failed verification: $TargetPath"
         exit 1
     }
 
     Add-UserPathEntry -PathEntry $ResolvedBinDir
-    Write-Host "Installed standalone Netorium CLI: $TargetPath"
-    Write-Host "If this terminal cannot find netorium, open a new PowerShell window."
+    Write-NetoriumOk "Standalone CLI installed: $TargetPath"
+    if (-not [string]::IsNullOrWhiteSpace($VersionOutput)) {
+        Write-NetoriumOk ($VersionOutput | Select-Object -First 1)
+    }
+    Write-NetoriumWarn "If this terminal cannot find netorium, open a new PowerShell window."
 }
 
-if ([string]::IsNullOrWhiteSpace($PackageSpec)) {
+function Resolve-PackageSpec {
+    if (-not [string]::IsNullOrWhiteSpace($PackageSpec)) {
+        return
+    }
+
     switch ($InstallSource) {
         "github" {
             if ($GithubRepo -eq "OWNER/REPO") {
                 Write-Error "Netorium GitHub repository is not configured. Set NETORIUM_GITHUB_REPO=owner/repo or NETORIUM_PACKAGE_SPEC before running this installer."
                 exit 1
             }
-            $PackageSpec = "https://github.com/$GithubRepo/archive/refs/$GithubRefKind/$GithubRef.zip"
+            $script:PackageSpec = "https://github.com/$GithubRepo/archive/refs/$GithubRefKind/$GithubRef.zip"
         }
         "pypi" {
-            $PackageSpec = $PackageName
+            $script:PackageSpec = $PackageName
         }
         "local" {
-            $PackageSpec = Split-Path -Parent $MyInvocation.MyCommand.Path
+            $script:PackageSpec = Split-Path -Parent $MyInvocation.MyCommand.Path
         }
         default {
             Write-Error "Unsupported NETORIUM_INSTALL_SOURCE: $InstallSource. Use github, pypi, local, or set NETORIUM_PACKAGE_SPEC directly."
@@ -233,10 +337,28 @@ if ([string]::IsNullOrWhiteSpace($PackageSpec)) {
     }
 }
 
+function Test-UpdateMode {
+    if ($UpdateMode) {
+        return
+    }
+    if (Get-Command netorium -ErrorAction SilentlyContinue) {
+        $script:UpdateMode = $true
+    }
+}
+
+Test-UpdateMode
+Write-NetoriumBanner
+if ($UpdateMode) {
+    Write-NetoriumStep "Updating Netorium CLI"
+} else {
+    Write-NetoriumStep "Installing Netorium CLI"
+}
+
+Resolve-PackageSpec
+
 if (Get-Command pipx -ErrorAction SilentlyContinue) {
-    pipx install --force $PackageSpec
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+    Invoke-NetoriumSpinner -Message "Installing with pipx" -Action {
+        pipx install --force $PackageSpec
     }
 } else {
     $Python = Get-PythonCommand
@@ -246,22 +368,20 @@ if (Get-Command pipx -ErrorAction SilentlyContinue) {
             exit 1
         }
 
+        Write-NetoriumWarn "Python 3.11+ or pipx was not found. Switching to standalone release."
         Install-StandaloneRelease
     } else {
-        & $Python.Command @($Python.Arguments + @("-m", "venv", $VenvDir))
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+        Invoke-NetoriumSpinner -Message "Creating virtual environment" -Action {
+            & $Python.Command @($Python.Arguments + @("-m", "venv", $VenvDir))
         }
 
         $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
-        & $VenvPython -m pip install --upgrade pip
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+        Invoke-NetoriumSpinner -Message "Upgrading pip" -Action {
+            & $VenvPython -m pip install --upgrade pip
         }
 
-        & $VenvPython -m pip install --upgrade $PackageSpec
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+        Invoke-NetoriumSpinner -Message "Installing Netorium package" -Action {
+            & $VenvPython -m pip install --upgrade $PackageSpec
         }
 
         New-Item -ItemType Directory -Force $BinDir *> $null
@@ -273,8 +393,21 @@ if (Get-Command pipx -ErrorAction SilentlyContinue) {
         )
 
         Add-UserPathEntry -PathEntry ((Resolve-Path $BinDir).Path)
+        Write-NetoriumOk "Linked command: $CmdPath"
     }
 }
 
-Write-Host "Netorium CLI installed."
-Write-Host "Run: netorium --help"
+if (Get-Command netorium -ErrorAction SilentlyContinue) {
+    $VersionLine = netorium version 2>$null | Select-Object -First 1
+    if (-not [string]::IsNullOrWhiteSpace($VersionLine)) {
+        Write-NetoriumOk $VersionLine
+    }
+}
+
+Write-Host ""
+if ($UpdateMode) {
+    Write-NetoriumOk "Netorium CLI updated."
+} else {
+    Write-NetoriumOk "Netorium CLI installed."
+}
+Write-NetoriumStep "Run: netorium --help"

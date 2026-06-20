@@ -307,7 +307,9 @@ def test_agent_policy_commands_validate_targets_and_limits(tmp_path: Path) -> No
         )
 
 
-def test_agent_firewall_command_requires_existing_agent_and_dry_run(tmp_path: Path) -> None:
+def test_agent_firewall_command_requires_existing_agent_and_allows_real_queue(
+    tmp_path: Path,
+) -> None:
     database_path = tmp_path / "netorium.db"
     init_controller(database_path, host="192.168.1.10", port=8765)
 
@@ -323,15 +325,16 @@ def test_agent_firewall_command_requires_existing_agent_and_dry_run(tmp_path: Pa
     token = create_enrollment_token(database_path, zone="accounting", ttl="24h")
     enrollment = enroll_agent(database_path, token=token.token, hostname="pc-acc-01")
 
-    with pytest.raises(ControllerError, match="Only dry-run"):
-        enqueue_agent_firewall_command(
-            database_path,
-            agent_id=enrollment.agent_id,
-            action="block",
-            ip_address="192.168.1.25",
-            reason="Policy test",
-            dry_run=False,
-        )
+    command = enqueue_agent_firewall_command(
+        database_path,
+        agent_id=enrollment.agent_id,
+        action="block",
+        ip_address="192.168.1.25",
+        reason="Policy test",
+        dry_run=False,
+    )
+
+    assert command.payload["dry_run"] is False
 
 
 def test_agent_heartbeat_rejects_invalid_device_token(tmp_path: Path) -> None:

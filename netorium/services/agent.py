@@ -12,6 +12,13 @@ import requests
 
 from netorium.core.platform import user_config_path
 from netorium.services.command_signing import hash_shared_secret, verify_agent_command_signature
+from netorium.services.endpoint_policy import (
+    EndpointPolicyError,
+    apply_app_policy,
+    apply_ip_firewall_policy,
+    apply_site_policy,
+    apply_speed_policy,
+)
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
@@ -275,7 +282,7 @@ def _execute_agent_command(state: AgentState, command: dict[str, Any]) -> AgentC
             return _execute_app_command(command_id, payload)
         if command_type == COMMAND_TYPE_SPEED_LIMIT:
             return _execute_speed_command(command_id, payload)
-    except AgentError as exc:
+    except (AgentError, EndpointPolicyError) as exc:
         return AgentCommandExecution(
             command_id=command_id,
             status="failed",
@@ -298,7 +305,12 @@ def _execute_firewall_command(command_id: str, payload: dict[str, Any]) -> Agent
     reason = _normalize_text(_read_payload_string(payload, "reason"), "Firewall reason")
     dry_run = payload.get("dry_run")
     if dry_run is not True:
-        raise AgentError("Real endpoint firewall commands are not implemented yet.")
+        result = apply_ip_firewall_policy(action=action, ip_address=ip_address, reason=reason)
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="completed",
+            message=result.message,
+        )
 
     return AgentCommandExecution(
         command_id=command_id,
@@ -311,7 +323,13 @@ def _execute_site_command(command_id: str, payload: dict[str, Any]) -> AgentComm
     action = _read_policy_action(payload, "Site policy action")
     domain = _normalize_domain(_read_payload_string(payload, "domain"))
     reason = _normalize_text(_read_payload_string(payload, "reason"), "Site policy reason")
-    _require_dry_run(payload)
+    if payload.get("dry_run") is not True:
+        result = apply_site_policy(action=action, domain=domain, reason=reason)
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="completed",
+            message=result.message,
+        )
 
     return AgentCommandExecution(
         command_id=command_id,
@@ -324,7 +342,13 @@ def _execute_app_command(command_id: str, payload: dict[str, Any]) -> AgentComma
     action = _read_policy_action(payload, "Application network action")
     executable = _normalize_executable(_read_payload_string(payload, "executable"))
     reason = _normalize_text(_read_payload_string(payload, "reason"), "Application network reason")
-    _require_dry_run(payload)
+    if payload.get("dry_run") is not True:
+        result = apply_app_policy(action=action, executable=executable, reason=reason)
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="completed",
+            message=result.message,
+        )
 
     return AgentCommandExecution(
         command_id=command_id,
@@ -336,9 +360,20 @@ def _execute_app_command(command_id: str, payload: dict[str, Any]) -> AgentComma
 def _execute_speed_command(command_id: str, payload: dict[str, Any]) -> AgentCommandExecution:
     action = _read_payload_string(payload, "action").lower()
     reason = _normalize_text(_read_payload_string(payload, "reason"), "Speed policy reason")
-    _require_dry_run(payload)
 
     if action == "clear":
+        if payload.get("dry_run") is not True:
+            result = apply_speed_policy(
+                action=action,
+                download_kbps=None,
+                upload_kbps=None,
+                reason=reason,
+            )
+            return AgentCommandExecution(
+                command_id=command_id,
+                status="completed",
+                message=result.message,
+            )
         return AgentCommandExecution(
             command_id=command_id,
             status="completed",
@@ -352,6 +387,19 @@ def _execute_speed_command(command_id: str, payload: dict[str, Any]) -> AgentCom
     upload_kbps = _read_optional_kbps(payload, "upload_kbps", "Upload speed")
     if download_kbps is None and upload_kbps is None:
         raise AgentError("Speed limit requires download_kbps or upload_kbps.")
+
+    if payload.get("dry_run") is not True:
+        result = apply_speed_policy(
+            action=action,
+            download_kbps=download_kbps,
+            upload_kbps=upload_kbps,
+            reason=reason,
+        )
+        return AgentCommandExecution(
+            command_id=command_id,
+            status="completed",
+            message=result.message,
+        )
 
     return AgentCommandExecution(
         command_id=command_id,
@@ -489,11 +537,6 @@ def _read_policy_action(payload: dict[str, Any], label: str) -> str:
     if action not in {"block", "unblock"}:
         raise AgentError(f"{label} must be block or unblock.")
     return action
-
-
-def _require_dry_run(payload: dict[str, Any]) -> None:
-    if payload.get("dry_run") is not True:
-        raise AgentError("Real endpoint policy commands are not implemented yet.")
 
 
 def _normalize_ip_address(value: str) -> str:

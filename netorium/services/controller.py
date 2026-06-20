@@ -299,14 +299,11 @@ def enqueue_agent_firewall_command(
     clean_action = _normalize_firewall_action(action)
     clean_ip = _normalize_ip_address(ip_address)
     clean_reason = _normalize_text(reason, "Firewall reason")
-    if not dry_run:
-        raise ControllerError("Only dry-run endpoint firewall commands are supported in this checkpoint.")
-
     payload: dict[str, Any] = {
         "action": clean_action,
         "ip_address": clean_ip,
         "reason": clean_reason,
-        "dry_run": True,
+        "dry_run": dry_run,
     }
     return _enqueue_agent_command(
         database_path,
@@ -316,7 +313,7 @@ def enqueue_agent_firewall_command(
         audit_details={
             "action": clean_action,
             "ip_address": clean_ip,
-            "dry_run": True,
+            "dry_run": dry_run,
         },
     )
 
@@ -334,14 +331,11 @@ def enqueue_agent_site_command(
     clean_action = _normalize_policy_action(action, "Site policy action")
     clean_domain = _normalize_domain(domain)
     clean_reason = _normalize_text(reason, "Site policy reason")
-    if not dry_run:
-        raise ControllerError("Only dry-run endpoint site commands are supported in this checkpoint.")
-
     payload: dict[str, Any] = {
         "action": clean_action,
         "domain": clean_domain,
         "reason": clean_reason,
-        "dry_run": True,
+        "dry_run": dry_run,
     }
     return _enqueue_agent_command(
         database_path,
@@ -351,7 +345,7 @@ def enqueue_agent_site_command(
         audit_details={
             "action": clean_action,
             "domain": clean_domain,
-            "dry_run": True,
+            "dry_run": dry_run,
         },
     )
 
@@ -369,14 +363,11 @@ def enqueue_agent_app_command(
     clean_action = _normalize_policy_action(action, "Application network action")
     clean_executable = _normalize_executable(executable)
     clean_reason = _normalize_text(reason, "Application network reason")
-    if not dry_run:
-        raise ControllerError("Only dry-run endpoint application commands are supported in this checkpoint.")
-
     payload: dict[str, Any] = {
         "action": clean_action,
         "executable": clean_executable,
         "reason": clean_reason,
-        "dry_run": True,
+        "dry_run": dry_run,
     }
     return _enqueue_agent_command(
         database_path,
@@ -386,7 +377,7 @@ def enqueue_agent_app_command(
         audit_details={
             "action": clean_action,
             "executable": clean_executable,
-            "dry_run": True,
+            "dry_run": dry_run,
         },
     )
 
@@ -403,14 +394,11 @@ def enqueue_agent_speed_command(
 ) -> AgentCommandRecord:
     clean_agent_id = _normalize_text(agent_id, "Agent ID")
     clean_reason = _normalize_text(reason, "Speed policy reason")
-    if not dry_run:
-        raise ControllerError("Only dry-run endpoint speed commands are supported in this checkpoint.")
-
     if clear:
         payload: dict[str, Any] = {
             "action": "clear",
             "reason": clean_reason,
-            "dry_run": True,
+            "dry_run": dry_run,
         }
     else:
         clean_download = _normalize_optional_kbps(download_kbps, "Download speed")
@@ -422,7 +410,7 @@ def enqueue_agent_speed_command(
             "download_kbps": clean_download,
             "upload_kbps": clean_upload,
             "reason": clean_reason,
-            "dry_run": True,
+            "dry_run": dry_run,
         }
 
     return _enqueue_agent_command(
@@ -434,7 +422,7 @@ def enqueue_agent_speed_command(
             "action": payload["action"],
             "download_kbps": payload.get("download_kbps"),
             "upload_kbps": payload.get("upload_kbps"),
-            "dry_run": True,
+            "dry_run": dry_run,
         },
     )
 

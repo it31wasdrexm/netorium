@@ -352,7 +352,7 @@ def test_run_agent_once_processes_site_app_and_speed_policy_commands(tmp_path: P
     ]
 
 
-def test_run_agent_once_rejects_real_firewall_command(tmp_path: Path) -> None:
+def test_run_agent_once_rejects_real_firewall_command_on_non_windows(tmp_path: Path) -> None:
     state_path = tmp_path / "agent.json"
     enroll_agent(
         controller_url="http://192.168.1.10:8765",
@@ -401,7 +401,7 @@ def test_run_agent_once_rejects_real_firewall_command(tmp_path: Path) -> None:
     result = run_agent_once(state_path, client=client)
 
     assert result.command_results[0].status == "failed"
-    assert result.command_results[0].message == "Real endpoint firewall commands are not implemented yet."
+    assert result.command_results[0].message == "Real endpoint policy commands are Windows-only."
 
 
 def test_run_agent_once_rejects_unsigned_or_tampered_command(tmp_path: Path) -> None:

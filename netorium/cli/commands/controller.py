@@ -48,6 +48,11 @@ agent_command_app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
+policy_app = typer.Typer(
+    help="Short commands for endpoint access policies.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
 
 console = Console()
 error_console = Console(stderr=True)
@@ -209,11 +214,11 @@ def agent_command_firewall(
         bool,
         typer.Option(
             "--dry-run/--real",
-            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+            help="Queue a dry-run command or a real Windows endpoint command.",
         ),
     ] = True,
 ) -> None:
-    """Queue a dry-run endpoint firewall command for an enrolled agent."""
+    """Queue an endpoint firewall command for an enrolled agent."""
     try:
         command = enqueue_agent_firewall_command(
             _database_path(),
@@ -245,11 +250,11 @@ def agent_command_site(
         bool,
         typer.Option(
             "--dry-run/--real",
-            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+            help="Queue a dry-run command or a real Windows endpoint command.",
         ),
     ] = True,
 ) -> None:
-    """Queue a dry-run website access command for an enrolled agent."""
+    """Queue a website access command for an enrolled agent."""
     try:
         command = enqueue_agent_site_command(
             _database_path(),
@@ -282,11 +287,11 @@ def agent_command_application(
         bool,
         typer.Option(
             "--dry-run/--real",
-            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+            help="Queue a dry-run command or a real Windows endpoint command.",
         ),
     ] = True,
 ) -> None:
-    """Queue a dry-run application network command for an enrolled agent."""
+    """Queue an application network command for an enrolled agent."""
     try:
         command = enqueue_agent_app_command(
             _database_path(),
@@ -322,11 +327,11 @@ def agent_command_speed(
         bool,
         typer.Option(
             "--dry-run/--real",
-            help="Queue a dry-run endpoint command. Real endpoint commands are not enabled yet.",
+            help="Queue a dry-run command or a real Windows endpoint command.",
         ),
     ] = True,
 ) -> None:
-    """Queue a dry-run speed limit command for an enrolled agent."""
+    """Queue a speed limit command for an enrolled agent."""
     try:
         command = enqueue_agent_speed_command(
             _database_path(),
@@ -379,6 +384,174 @@ def agent_command_list(
     console.print(table)
 
 
+@policy_app.command("agents")
+def policy_agents() -> None:
+    """List connected endpoint agents."""
+    agent_list()
+
+
+@policy_app.command("list")
+def policy_list(
+    agent_id: Annotated[
+        str | None,
+        typer.Argument(help="Optional endpoint agent ID."),
+    ] = None,
+) -> None:
+    """List queued and completed endpoint policy commands."""
+    agent_command_list(agent_id=agent_id)
+
+
+@policy_app.command("ip")
+def policy_ip(
+    agent_id: Annotated[str, typer.Argument(help="Endpoint agent ID.")],
+    ip_address: Annotated[str, typer.Argument(help="Target IP address.")],
+    reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
+    unblock: Annotated[
+        bool,
+        typer.Option("--unblock", help="Remove the block instead of adding it."),
+    ] = False,
+    real: Annotated[
+        bool,
+        typer.Option("--real", help="Apply on the Windows endpoint. Default is dry-run."),
+    ] = False,
+) -> None:
+    """Block or unblock an IP on an endpoint."""
+    try:
+        command = enqueue_agent_firewall_command(
+            _database_path(),
+            agent_id=agent_id,
+            action=_policy_action(unblock),
+            ip_address=ip_address,
+            reason=reason,
+            dry_run=not real,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
+@policy_app.command("site")
+def policy_site(
+    agent_id: Annotated[str, typer.Argument(help="Endpoint agent ID.")],
+    domain: Annotated[str, typer.Argument(help="Domain or URL.")],
+    reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
+    unblock: Annotated[
+        bool,
+        typer.Option("--unblock", help="Remove the block instead of adding it."),
+    ] = False,
+    real: Annotated[
+        bool,
+        typer.Option("--real", help="Apply on the Windows endpoint. Default is dry-run."),
+    ] = False,
+) -> None:
+    """Block or unblock a website on an endpoint."""
+    try:
+        command = enqueue_agent_site_command(
+            _database_path(),
+            agent_id=agent_id,
+            action=_policy_action(unblock),
+            domain=domain,
+            reason=reason,
+            dry_run=not real,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
+@policy_app.command("app")
+@policy_app.command("game")
+def policy_app_command(
+    agent_id: Annotated[str, typer.Argument(help="Endpoint agent ID.")],
+    executable: Annotated[str, typer.Argument(help="Executable name or full path.")],
+    reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
+    unblock: Annotated[
+        bool,
+        typer.Option("--unblock", help="Remove the block instead of adding it."),
+    ] = False,
+    real: Annotated[
+        bool,
+        typer.Option("--real", help="Apply on the Windows endpoint. Default is dry-run."),
+    ] = False,
+) -> None:
+    """Block or unblock an application/game on an endpoint."""
+    try:
+        command = enqueue_agent_app_command(
+            _database_path(),
+            agent_id=agent_id,
+            action=_policy_action(unblock),
+            executable=executable,
+            reason=reason,
+            dry_run=not real,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
+@policy_app.command("speed")
+def policy_speed(
+    agent_id: Annotated[str, typer.Argument(help="Endpoint agent ID.")],
+    reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
+    download_kbps: Annotated[
+        int | None,
+        typer.Option("--down", help="Download limit in kilobits per second."),
+    ] = None,
+    upload_kbps: Annotated[
+        int | None,
+        typer.Option("--up", help="Upload limit in kilobits per second."),
+    ] = None,
+    real: Annotated[
+        bool,
+        typer.Option("--real", help="Apply on the Windows endpoint. Default is dry-run."),
+    ] = False,
+) -> None:
+    """Set an endpoint speed limit."""
+    try:
+        command = enqueue_agent_speed_command(
+            _database_path(),
+            agent_id=agent_id,
+            download_kbps=download_kbps,
+            upload_kbps=upload_kbps,
+            clear=False,
+            reason=reason,
+            dry_run=not real,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
+@policy_app.command("clear-speed")
+def policy_clear_speed(
+    agent_id: Annotated[str, typer.Argument(help="Endpoint agent ID.")],
+    reason: Annotated[str, typer.Option("--reason", "-r", help="Required audit reason.")],
+    real: Annotated[
+        bool,
+        typer.Option("--real", help="Apply on the Windows endpoint. Default is dry-run."),
+    ] = False,
+) -> None:
+    """Clear an endpoint speed limit."""
+    try:
+        command = enqueue_agent_speed_command(
+            _database_path(),
+            agent_id=agent_id,
+            download_kbps=None,
+            upload_kbps=None,
+            clear=True,
+            reason=reason,
+            dry_run=not real,
+        )
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+
+    _render_agent_command(command)
+
+
 agent_app.add_typer(agent_command_app, name="command")
 controller_app.add_typer(token_app, name="token")
 controller_app.add_typer(agent_app, name="agent")
@@ -421,6 +594,10 @@ def _payload_summary(payload: dict[str, object]) -> str:
             f"up={payload.get('upload_kbps', '-')} dry-run={dry_run}"
         )
     return f"{action} dry-run={dry_run}"
+
+
+def _policy_action(unblock: bool) -> str:
+    return "unblock" if unblock else "block"
 
 
 def _render_agent_command(command: AgentCommandRecord) -> None:

@@ -88,6 +88,20 @@ netorium-agent run
 netorium controller agent command list --agent-id AGENT_ID
 ```
 
+Queue real Windows endpoint policies for a connected office PC:
+
+```bash
+netorium controller agent command site --agent-id AGENT_ID --action block --domain youtube.com --reason "Class policy" --real
+netorium controller agent command binary --agent-id AGENT_ID --action block --executable C:\Games\dota2.exe --reason "No game traffic" --real
+netorium controller agent command speed --agent-id AGENT_ID --upload-kbps 512 --reason "Temporary upload limit" --real
+netorium-agent run
+netorium controller agent command list --agent-id AGENT_ID
+```
+
+Real endpoint commands require the agent to run on Windows as administrator.
+Website blocks use the Windows hosts file, application blocks use Windows
+Firewall program rules, and speed limits use Windows QoS outbound throttling.
+
 Run Netorium through Docker:
 
 ```bash

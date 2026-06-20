@@ -213,13 +213,9 @@ configured bind password.
 ## Telegram
 
 ```bash
-netorium telegram test
 netorium telegram start
 netorium telegram start --token BOT_TOKEN
 ```
-
-The Telegram test command checks the configured bot token through Telegram
-`getMe`. It does not print the bot token or chat id.
 
 `netorium telegram start` runs the Telegram bot in the foreground, listening for
 admin commands and monitoring traffic anomalies. The bot supports commands like

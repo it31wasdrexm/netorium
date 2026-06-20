@@ -143,13 +143,6 @@ Test Active Directory bind settings after replacing the placeholder credentials:
 ```bash
 netorium ad test
 ```
-
-Test Telegram bot settings after replacing the placeholder credentials:
-
-```bash
-netorium telegram test
-```
-
 Start the Telegram bot to listen for admin commands and monitor traffic:
 
 ```bash

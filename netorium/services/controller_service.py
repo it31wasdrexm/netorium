@@ -13,6 +13,7 @@ Usage
 
 from __future__ import annotations
 
+import ctypes
 import os
 import shutil
 import subprocess
@@ -53,6 +54,7 @@ def install_controller_service(
     if platform == "darwin":
         return _install_launchd(host=host, port=port)
     if platform.startswith("win"):
+        reexec_windows_admin_if_needed(["controller", "install-service", "--host", host, "--port", str(port)])
         return _install_windows_service(host=host, port=port)
     raise ControllerServiceError(
         f"Unsupported platform: {platform}. "
@@ -71,6 +73,7 @@ def uninstall_controller_service() -> str:
     if platform == "darwin":
         return _uninstall_launchd()
     if platform.startswith("win"):
+        reexec_windows_admin_if_needed(["controller", "uninstall-service"])
         return _uninstall_windows_service()
     raise ControllerServiceError(
         f"Unsupported platform: {platform}."
@@ -117,6 +120,65 @@ def reexec_system_install_if_needed(
             "sudo was not found. Install sudo or run the install command as root:\n"
             f"  {executable} controller install-service --system"
         ) from exc
+
+
+def _is_windows_admin() -> bool:
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except AttributeError:
+        return False
+
+
+def reexec_windows_admin_if_needed(args: list[str]) -> None:
+    """Re-exec this process with administrator privileges on Windows."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    if _is_windows_admin():
+        return
+    executable = resolve_netorium_executable()
+    # Create the command string for the argument
+    args_str = " ".join(f'"{a}"' if " " in a else a for a in args)
+    try:
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, args_str, None, 1)
+        if result <= 32:
+            raise ControllerServiceError("Failed to request Administrator privileges.")
+        # Successfully elevated, exit current non-elevated process
+        sys.exit(0)
+    except Exception as exc:
+        raise ControllerServiceError(
+            "Administrator privileges are required to manage services on Windows.\n"
+            "Please run PowerShell or Windows Terminal as Administrator and try again."
+        ) from exc
+
+
+def uninstall_services_silently() -> None:
+    """Silently stop and delete all netorium services (controller and agent)."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    try:
+        if sys.platform.startswith("win"):
+            if not _is_windows_admin():
+                # Cannot silently elevate without prompt, skip or it will fail
+                pass
+            _run_optional(["sc", "stop", "NetoriumController"])
+            _run_optional(["sc", "delete", "NetoriumController"])
+            _run_optional(["sc", "stop", "NetoriumAgent"])
+            _run_optional(["sc", "delete", "NetoriumAgent"])
+        elif sys.platform.startswith("linux"):
+            _run_optional(["sudo", "systemctl", "stop", "netorium-controller"])
+            _run_optional(["sudo", "systemctl", "disable", "netorium-controller"])
+            _run_optional(["systemctl", "--user", "stop", "netorium-controller"])
+            _run_optional(["systemctl", "--user", "disable", "netorium-controller"])
+            
+            _run_optional(["sudo", "systemctl", "stop", "netorium-agent"])
+            _run_optional(["sudo", "systemctl", "disable", "netorium-agent"])
+            _run_optional(["systemctl", "--user", "stop", "netorium-agent"])
+            _run_optional(["systemctl", "--user", "disable", "netorium-agent"])
+        elif sys.platform == "darwin":
+            # Best effort
+            pass
+    except Exception:
+        pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ from netorium.services.endpoint_policy import (
     apply_speed_policy,
 )
 from netorium.services.windows_service import build_sc_create_command
+from netorium.services.controller_service import reexec_windows_admin_if_needed
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
@@ -439,6 +440,7 @@ def _launchd_action(action: str) -> str:
 # ─── Windows ──────────────────────────────────────────────────────────────────
 
 def _windows_service_action(action: str) -> str:
+    reexec_windows_admin_if_needed(["agent", "service", action])
     executable = _find_netorium_executable()
     svc = _WINDOWS_SERVICE_NAME
     nssm = shutil.which("nssm")

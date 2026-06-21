@@ -1,6 +1,7 @@
 import platform
 import shlex
 import subprocess
+import sys
 from typing import Annotated
 
 import typer
@@ -29,6 +30,8 @@ from netorium.core.settings import default_config_path
 from netorium.services.controller_service import (
     ControllerServiceError,
     resolve_netorium_executable,
+    uninstall_services_silently,
+    reexec_windows_admin_if_needed,
 )
 from netorium.services.update_notifications import StartupUpdateNotice, get_startup_update_notice
 from netorium.services.uninstaller import (
@@ -272,7 +275,10 @@ def uninstall(
         typer.Option("--dry-run", help="Preview the uninstall plan without removing anything."),
     ] = False,
 ) -> None:
-    """Uninstall Netorium with safe y/n prompts by default."""
+    """Uninstall Netorium gracefully and completely."""
+    if sys.platform.startswith("win"):
+        reexec_windows_admin_if_needed(sys.argv[1:])
+
     yes, dry_run, remove_data, package_manager = _apply_uninstall_extra_args(
         ctx.args,
         yes=yes,
@@ -304,6 +310,8 @@ def uninstall(
                 default=False,
             )
 
+    # Clean up services completely on both Windows and Linux before actual deletion
+    uninstall_services_silently()
     _execute_uninstall(remove_data=bool(remove_data), package_manager=package_manager)
 
 

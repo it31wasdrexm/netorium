@@ -125,7 +125,13 @@ def reexec_system_install_if_needed(
 
 _SYSTEMD_SERVICE_NAME = "netorium-controller"
 _SYSTEMD_SYSTEM_DIR = Path("/etc/systemd/system")
-_SYSTEMD_USER_DIR = Path("~/.config/systemd/user").expanduser()
+
+
+def _systemd_user_dir() -> Path:
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / "systemd" / "user"
+    return Path("~/.config/systemd/user").expanduser()
 
 
 def _systemd_unit_content(executable: str, host: str, port: int) -> str:
@@ -183,14 +189,14 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
         _run(["systemctl", "daemon-reload"])
         _run(["systemctl", "enable", "--now", _SYSTEMD_SERVICE_NAME])
         return (
-            f"[systemd] System service installed and started: {unit_file}\n"
+            f"System service installed and started: {unit_file}\n"
             f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}\n"
             f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f\n"
             f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}\n"
             f"  Remove:  netorium controller uninstall-service"
         )
     else:
-        unit_dir = _SYSTEMD_USER_DIR
+        unit_dir = _systemd_user_dir()
         unit_dir.mkdir(parents=True, exist_ok=True)
         unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
         content = _systemd_user_unit_content(executable, host, port)
@@ -202,7 +208,7 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
         if username:
             _run_optional(["loginctl", "enable-linger", username])
         return (
-            f"[systemd --user] User service installed and started: {unit_file}\n"
+            f"User service installed and started: {unit_file}\n"
             f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
             f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
             f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
@@ -222,15 +228,15 @@ def _uninstall_systemd() -> str:
         if unit_file.exists():
             unit_file.unlink()
         _run_optional(["systemctl", "daemon-reload"])
-        return f"[systemd] System service removed: {unit_file}"
+        return f"System service removed: {unit_file}"
     else:
         _run_optional(["systemctl", "--user", "stop", _SYSTEMD_SERVICE_NAME])
         _run_optional(["systemctl", "--user", "disable", _SYSTEMD_SERVICE_NAME])
-        unit_file = _SYSTEMD_USER_DIR / f"{_SYSTEMD_SERVICE_NAME}.service"
+        unit_file = _systemd_user_dir() / f"{_SYSTEMD_SERVICE_NAME}.service"
         if unit_file.exists():
             unit_file.unlink()
         _run_optional(["systemctl", "--user", "daemon-reload"])
-        return f"[systemd --user] User service removed: {unit_file}"
+        return f"User service removed: {unit_file}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -280,7 +286,7 @@ def _install_launchd(host: str, port: int) -> str:
     plist_file.write_text(_launchd_plist_content(executable, host, port), encoding="utf-8")
     _run(["launchctl", "load", "-w", str(plist_file)])
     return (
-        f"[launchd] Launch Agent installed and started: {plist_file}\n"
+        f"Launch Agent installed and started: {plist_file}\n"
         f"  Status:  launchctl list | grep netorium\n"
         f"  Logs:    tail -f /tmp/netorium-controller.log\n"
         f"  Stop:    launchctl unload {plist_file}\n"
@@ -293,7 +299,7 @@ def _uninstall_launchd() -> str:
     if plist_file.exists():
         _run_optional(["launchctl", "unload", "-w", str(plist_file)])
         plist_file.unlink()
-    return f"[launchd] Launch Agent removed: {plist_file}"
+    return f"Launch Agent removed: {plist_file}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -322,7 +328,7 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
     _run([nssm, "set", svc, "AppStderr", r"C:\ProgramData\Netorium\controller.err"])
     _run([nssm, "start", svc])
     return (
-        f"[Windows/NSSM] Service '{svc}' installed and started.\n"
+        f"Windows service '{svc}' installed and started with NSSM.\n"
         f"  Status:  sc query {svc}\n"
         f"  Logs:    C:\\ProgramData\\Netorium\\controller.log\n"
         f"  Stop:    sc stop {svc}\n"
@@ -342,7 +348,7 @@ def _install_windows_sc(executable: str, host: str, port: int) -> str:
     )
     _run(["sc", "start", svc])
     return (
-        f"[Windows/sc.exe] Service '{svc}' installed and started.\n"
+        f"Windows service '{svc}' installed and started with sc.exe.\n"
         f"  Status:  sc query {svc}\n"
         f"  Stop:    sc stop {svc}\n"
         f"  Remove:  netorium controller uninstall-service\n"
@@ -360,7 +366,7 @@ def _uninstall_windows_service() -> str:
     else:
         _run_optional(["sc", "stop", svc])
         _run_optional(["sc", "delete", svc])
-    return f"[Windows] Service '{svc}' stopped and removed."
+    return f"Windows service '{svc}' stopped and removed."
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -394,9 +400,14 @@ def _run(cmd: list[str]) -> None:
             f"Command not found: {cmd[0]}. Is it installed and on PATH?"
         ) from exc
     except subprocess.CalledProcessError as exc:
+        stdout = (exc.stdout or "").strip()
         stderr = (exc.stderr or "").strip()
+        output = "\n".join(part for part in (stdout, stderr) if part)
+        command_text = subprocess.list2cmdline(cmd)
+        hint = _service_command_hint(cmd, output)
+        details = "\n".join(part for part in (output, hint) if part)
         raise ControllerServiceError(
-            f"Command failed: {' '.join(cmd)}\n{stderr}"
+            f"Command failed: {command_text}" + (f"\n{details}" if details else "")
         ) from exc
 
 
@@ -406,6 +417,22 @@ def _run_optional(cmd: list[str]) -> None:
         subprocess.run(cmd, check=False, capture_output=True, text=True)
     except FileNotFoundError:
         pass
+
+
+def _service_command_hint(cmd: list[str], output: str) -> str:
+    if not cmd:
+        return ""
+
+    command_name = Path(cmd[0]).name.lower()
+    if command_name not in {"sc", "sc.exe"}:
+        return ""
+
+    normalized_output = output.lower()
+    if "access is denied" in normalized_output or "отказано в доступе" in normalized_output:
+        return "Hint: open Windows Terminal or PowerShell as Administrator, then run this command again."
+    if "already exists" in normalized_output or "уже существует" in normalized_output:
+        return "Hint: remove the old service first with: netorium controller uninstall-service"
+    return ""
 
 
 def _write_file_root(path: Path, content: str) -> None:

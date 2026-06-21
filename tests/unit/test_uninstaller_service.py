@@ -55,6 +55,39 @@ def test_uninstall_plan_uses_pip_directly_when_frozen(monkeypatch: pytest.Monkey
     )
 
 
+def test_uninstall_plan_handles_windows_standalone_when_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("netorium.services.uninstaller.sys.frozen", True, raising=False)
+    env = {
+        "APPDATA": str(tmp_path / "Roaming"),
+        "LOCALAPPDATA": str(tmp_path / "Local"),
+    }
+
+    plan = build_uninstall_plan(
+        remove_data=True,
+        executable=r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe",
+        which=lambda _command: None,
+        env=env,
+        platform_name="win32",
+    )
+
+    assert plan.package_manager == "standalone"
+    assert plan.package_command_detached is True
+    assert plan.path_targets == ()
+    assert plan.package_command is not None
+    assert plan.package_command[:3] == ("cmd.exe", "/d", "/c")
+    assert "timeout /t 3" in plan.package_command[3]
+    assert "Netorium" in plan.package_command[3]
+    assert [target.label for target in plan.deferred_path_targets] == [
+        "Configuration directory",
+        "Application data directory",
+        "Cache directory",
+        "Standalone executable",
+    ]
+
+
 def test_uninstall_plan_rejects_unknown_package_manager() -> None:
     with pytest.raises(UninstallError, match="Package manager must be"):
         build_uninstall_plan(package_manager="brew")
@@ -75,6 +108,7 @@ def test_execute_uninstall_plan_removes_requested_data_paths(tmp_path: Path) -> 
     assert (tmp_path / "config" / "netorium").exists() is False
     assert (tmp_path / "data" / "netorium").exists() is False
     assert (tmp_path / "cache" / "netorium").exists() is False
+    assert result.deferred_paths == ()
 
 
 def _write_config_and_data(tmp_path: Path) -> dict[str, str]:

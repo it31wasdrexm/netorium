@@ -198,6 +198,57 @@ accepts both names.
 On Linux and macOS the installer downloads `netorium-linux-x64` or the matching
 macOS asset into `~/.local/bin/netorium` when Python is unavailable.
 
+## Controller Background Service
+
+After initializing the local controller, install it as a background service so
+it starts with the PC:
+
+```bash
+netorium controller init
+netorium controller install-service
+```
+
+On Windows, run PowerShell or Windows Terminal as Administrator before installing
+the service. Netorium uses NSSM when it is available; otherwise it registers the
+service with `sc.exe` and quotes the installed executable path, including the
+default standalone installer path:
+
+```text
+%LOCALAPPDATA%\Netorium\bin\netorium.exe
+```
+
+If Windows reports that the service already exists, remove it first:
+
+```bash
+netorium controller uninstall-service
+netorium controller install-service
+```
+
+## Uninstall
+
+Use the guided command for normal removal:
+
+```bash
+netorium uninstall
+```
+
+It asks whether to remove the installed Netorium command and then asks whether
+to remove local config, database, and cache. Preview the plan without deleting
+anything:
+
+```bash
+netorium uninstall --dry-run --remove-data
+```
+
+For automation:
+
+```bash
+netorium uninstall --yes --remove-data
+```
+
+On Windows standalone installs, Netorium schedules removal of the running
+`%LOCALAPPDATA%\Netorium\bin\netorium.exe` after the CLI process exits.
+
 ## Docker
 
 Docker does not require Python on the host PC.

@@ -25,13 +25,17 @@ netorium> exit
 
 ```bash
 netorium uninstall
+netorium uninstall --dry-run
+netorium uninstall --dry-run --remove-data
 netorium uninstall --yes
 netorium uninstall --yes --remove-data
 ```
 
-`netorium uninstall` is a dry-run by default. Use `--yes` to remove the installed
-package. Add `--remove-data` only when you also want to remove Netorium user
-configuration, local data, and cache directories.
+`netorium uninstall` is guided by default. It first asks whether to remove the
+installed Netorium command, then asks whether to remove Netorium user
+configuration, local data, database, and cache directories. Use `--dry-run` to
+preview the plan without deleting anything. Use `--yes` for automation, and add
+`--remove-data` only when automation should also remove local Netorium data.
 
 ## Configuration
 
@@ -104,7 +108,11 @@ a router, gateway, or future packet-filter adapter.
 `controller install-service` registers a background service on Linux (systemd),
 Windows (sc.exe or NSSM), or macOS (launchd). On Linux, the default user service
 works without root; pass `--system` to install a system-wide unit and let
-Netorium re-exec itself under sudo with the resolved executable path.
+Netorium re-exec itself under sudo with the resolved executable path. On
+Windows, run PowerShell or Windows Terminal as Administrator before calling
+`netorium controller install-service`; remove an old service first with
+`netorium controller uninstall-service` if Windows reports that it already
+exists.
 
 ## Policy Shortcuts
 

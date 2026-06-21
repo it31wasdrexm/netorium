@@ -34,10 +34,11 @@ Check local CLI health:
 netorium doctor --verbose
 ```
 
-Preview uninstall and then remove Netorium completely:
+Run guided uninstall, or preview and remove Netorium completely from automation:
 
 ```bash
 netorium uninstall
+netorium uninstall --dry-run --remove-data
 netorium uninstall --yes --remove-data
 ```
 

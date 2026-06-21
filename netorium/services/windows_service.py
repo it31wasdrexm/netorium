@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 
 
 def format_sc_binpath(executable: str, args: Sequence[str]) -> str:
     """Format the binPath value for ``sc.exe create``.
 
-    When the executable path contains spaces, it is wrapped in double quotes
-    so that ``sc.exe`` / the SCM correctly identifies the executable boundary
-    from its arguments.  These inner quotes are then properly escaped by
-    :func:`subprocess.list2cmdline` when the command is run as a list via
-    :func:`subprocess.run`.
+    ``sc.exe`` stores this value as the service ImagePath.  The executable is
+    always quoted so the Windows Service Control Manager can split it from the
+    controller arguments even when the path has no spaces.
     """
-    arg_string = " ".join(args)
-    if " " in executable:
-        return f'"{executable}" {arg_string}'
-    return f"{executable} {arg_string}"
+    executable_part = subprocess.list2cmdline([executable])
+    if not executable_part.startswith('"'):
+        executable_part = f'"{executable_part}"'
+    arg_string = subprocess.list2cmdline(list(args))
+    if arg_string:
+        return f"{executable_part} {arg_string}"
+    return executable_part
 
 
 def build_sc_create_command(
@@ -30,10 +32,13 @@ def build_sc_create_command(
     """Build argument list for ``sc.exe create``."""
     binpath = format_sc_binpath(executable, args)
     return [
-        "sc",
+        "sc.exe",
         "create",
         service_name,
-        f"binPath= {binpath}",
-        "start= auto",
-        f"DisplayName= {display_name}",
+        "binPath=",
+        binpath,
+        "start=",
+        "auto",
+        "DisplayName=",
+        display_name,
     ]

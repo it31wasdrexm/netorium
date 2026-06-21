@@ -4,6 +4,7 @@ import subprocess
 from typing import Annotated
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -42,33 +43,44 @@ from netorium.services.uninstaller import (
 console = Console()
 error_console = Console(stderr=True)
 
+_HELP_EPILOG = (
+    "Quick start: netorium | netorium controller install-service | "
+    "netorium uninstall. Shell commands: help, controller status, exit."
+)
+_UNINSTALL_CONTEXT_SETTINGS = {"allow_extra_args": True, "ignore_unknown_options": True}
+
 app = typer.Typer(
     name="netorium",
-    help="Netorium CLI for building-level network access control.",
+    help=(
+        "[bold]Netorium[/] CLI for building-level network access control. "
+        "Local controller, endpoint agents, policies, reports, and integrations."
+    ),
+    epilog=_HELP_EPILOG,
+    context_settings={"help_option_names": ["-h", "--help"]},
     no_args_is_help=False,
     rich_markup_mode="rich",
 )
 
-app.add_typer(config_app, name="config")
-app.add_typer(docs_app, name="docs")
-app.add_typer(update_app, name="update")
-app.add_typer(controller_app, name="controller")
-app.add_typer(policy_app, name="policy")
-app.add_typer(deploy_app, name="deploy")
-app.add_typer(zone_app, name="zone")
-app.add_typer(device_app, name="device")
-app.add_typer(firewall_app, name="firewall")
-app.add_typer(prtg_app, name="prtg")
-app.add_typer(ad_app, name="ad")
-app.add_typer(telegram_app, name="telegram")
-app.add_typer(report_app, name="report")
-app.add_typer(audit_app, name="audit")
-app.add_typer(endpoint_agent_app, name="agent")
+app.add_typer(config_app, name="config", rich_help_panel="Setup")
+app.add_typer(docs_app, name="docs", rich_help_panel="Setup")
+app.add_typer(update_app, name="update", rich_help_panel="Setup")
+app.add_typer(controller_app, name="controller", rich_help_panel="Controller")
+app.add_typer(policy_app, name="policy", rich_help_panel="Controller")
+app.add_typer(deploy_app, name="deploy", rich_help_panel="Controller")
+app.add_typer(endpoint_agent_app, name="agent", rich_help_panel="Controller")
+app.add_typer(zone_app, name="zone", rich_help_panel="Inventory")
+app.add_typer(device_app, name="device", rich_help_panel="Inventory")
+app.add_typer(firewall_app, name="firewall", rich_help_panel="Policy")
+app.add_typer(report_app, name="report", rich_help_panel="Policy")
+app.add_typer(audit_app, name="audit", rich_help_panel="Policy")
+app.add_typer(prtg_app, name="prtg", rich_help_panel="Integrations")
+app.add_typer(ad_app, name="ad", rich_help_panel="Integrations")
+app.add_typer(telegram_app, name="telegram", rich_help_panel="Integrations")
 
 
 def _parse_interactive_line(line: str) -> list[str]:
     try:
-        return shlex.split(line)
+        return [_normalize_dash_arg(arg) for arg in shlex.split(line)]
     except ValueError as exc:
         console.print(f"[red]Could not parse command:[/] {exc}")
         return []
@@ -163,8 +175,9 @@ def _render_interactive_header() -> None:
     console.print(
         Panel.fit(
             f"[bold]{APP_NAME} {get_version()}[/]\n"
-            "Netorium interactive mode. Type commands without the netorium prefix.\n"
-            "[dim]Try: version, doctor, config path, update show, help, exit[/]",
+            "Interactive command center for the local controller and endpoint policies.\n"
+            "[dim]Try: help, controller status, controller install-service, "
+            "uninstall, exit[/]",
             title="netorium",
             border_style="cyan",
         )
@@ -199,13 +212,13 @@ def main(ctx: typer.Context) -> None:
         _run_interactive_shell()
 
 
-@app.command()
+@app.command(rich_help_panel="Essentials")
 def version() -> None:
     """Show the installed Netorium CLI version."""
     console.print(f"{APP_NAME} {get_version()}")
 
 
-@app.command()
+@app.command(rich_help_panel="Essentials")
 def doctor(
     verbose: Annotated[
         bool,
@@ -227,33 +240,74 @@ def doctor(
         console.print("Run `netorium config validate` to validate the active configuration.")
 
 
-@app.command("unistall", hidden=True)
-@app.command("uninstall")
+@app.command("unistall", hidden=True, context_settings=_UNINSTALL_CONTEXT_SETTINGS)
+@app.command(
+    "uninstall",
+    context_settings=_UNINSTALL_CONTEXT_SETTINGS,
+    rich_help_panel="Lifecycle",
+)
 def uninstall(
+    ctx: typer.Context,
     remove_data: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--remove-data/--keep-data",
-            help="Remove Netorium user config, data, and cache directories.",
+            help="Remove Netorium user config, data, and cache directories too.",
+            show_default=False,
         ),
-    ] = False,
+    ] = None,
     package_manager: Annotated[
         str,
         typer.Option(
             "--package-manager",
-            help="Package uninstall method: auto, pipx, pip, or none.",
+            help="Package uninstall method: auto, pipx, pip, standalone, or none.",
         ),
     ] = "auto",
     yes: Annotated[
         bool,
-        typer.Option("--yes", help="Actually uninstall. Without this, only a dry-run is shown."),
+        typer.Option("--yes", help="Skip prompts and uninstall the package."),
     ] = False,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="Force preview mode even when --yes is provided."),
+        typer.Option("--dry-run", help="Preview the uninstall plan without removing anything."),
     ] = False,
 ) -> None:
-    """Preview or run a local Netorium CLI uninstall."""
+    """Uninstall Netorium with safe y/n prompts by default."""
+    yes, dry_run, remove_data, package_manager = _apply_uninstall_extra_args(
+        ctx.args,
+        yes=yes,
+        dry_run=dry_run,
+        remove_data=remove_data,
+        package_manager=package_manager,
+    )
+
+    if dry_run:
+        _preview_uninstall(remove_data=bool(remove_data), package_manager=package_manager)
+        return
+
+    if not yes:
+        console.print(
+            Panel.fit(
+                "This will remove the installed Netorium command.\n"
+                "You can keep or remove local config, database, and cache in the next step.",
+                title="Netorium Uninstall",
+                border_style="yellow",
+            )
+        )
+        if not typer.confirm("Uninstall Netorium now?", default=False):
+            console.print("Cancelled. No package or user data was removed.")
+            return
+
+        if remove_data is None:
+            remove_data = typer.confirm(
+                "Remove Netorium config, database, and cache too?",
+                default=False,
+            )
+
+    _execute_uninstall(remove_data=bool(remove_data), package_manager=package_manager)
+
+
+def _preview_uninstall(*, remove_data: bool, package_manager: str) -> None:
     try:
         plan = build_uninstall_plan(
             remove_data=remove_data,
@@ -262,16 +316,23 @@ def uninstall(
     except UninstallError as exc:
         _fail(exc)
 
-    is_dry_run = dry_run or not yes
-    _render_uninstall_plan(plan, dry_run=is_dry_run)
+    _render_uninstall_plan(plan, dry_run=True)
+    console.print("Preview only. No package or user data was removed.")
+    console.print("Run `netorium uninstall` for guided removal, or add `--yes` for automation.")
+    if not remove_data:
+        console.print("Add `--remove-data` to preview config, database, and cache removal too.")
 
-    if is_dry_run:
-        console.print("Dry run only. No package or user data was removed.")
-        console.print("Run with --yes to uninstall the package.")
-        if not remove_data:
-            console.print("Add --remove-data with --yes to remove Netorium config and local data too.")
-        return
 
+def _execute_uninstall(*, remove_data: bool, package_manager: str) -> None:
+    try:
+        plan = build_uninstall_plan(
+            remove_data=remove_data,
+            package_manager=package_manager,
+        )
+    except UninstallError as exc:
+        _fail(exc)
+
+    _render_uninstall_plan(plan, dry_run=False)
     try:
         result = execute_uninstall_plan(plan)
     except UninstallError as exc:
@@ -281,21 +342,22 @@ def uninstall(
 
 
 def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
-    table = Table(title="Netorium Uninstall")
+    table = Table(title="Netorium Uninstall", box=box.SIMPLE_HEAVY)
     table.add_column("Field")
     table.add_column("Value")
-    table.add_row("Mode", "dry-run" if dry_run else "real")
+    table.add_row("Mode", "preview" if dry_run else "confirmed")
     table.add_row("Package", plan.package_name)
     table.add_row("Package manager", plan.package_manager)
     table.add_row(
         "Package command",
         format_command(plan.package_command) if plan.package_command is not None else "none",
     )
+    table.add_row("Command timing", "after Netorium exits" if plan.package_command_detached else "now")
     table.add_row("Remove data", "yes" if plan.remove_data else "no")
     console.print(table)
 
     if plan.path_targets:
-        targets_table = Table(title="Data Targets")
+        targets_table = Table(title="Data Targets", box=box.SIMPLE)
         targets_table.add_column("Target")
         targets_table.add_column("Path")
         targets_table.add_column("Exists")
@@ -306,6 +368,15 @@ def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
                 "yes" if target.path.exists() or target.path.is_symlink() else "no",
             )
         console.print(targets_table)
+
+    if plan.deferred_path_targets:
+        deferred_table = Table(title="Scheduled Cleanup Targets", box=box.SIMPLE)
+        deferred_table.add_column("Target")
+        deferred_table.add_column("Path")
+        deferred_table.add_column("Timing")
+        for target in plan.deferred_path_targets:
+            deferred_table.add_row(target.label, str(target.path), "after exit")
+        console.print(deferred_table)
 
     if plan.external_database_path is not None:
         console.print(
@@ -326,7 +397,58 @@ def _render_uninstall_result(result: UninstallResult) -> None:
     for path in result.skipped_paths:
         console.print(f"Skipped missing path: {path}")
 
+    for path in result.deferred_paths:
+        console.print(f"Scheduled after exit: {path}")
+
     console.print("Netorium uninstall completed.")
+
+
+def _normalize_dash_arg(arg: str) -> str:
+    if arg.startswith(("—", "–", "−")):
+        return "--" + arg[1:]
+    return arg
+
+
+def _apply_uninstall_extra_args(
+    extra_args: list[str],
+    *,
+    yes: bool,
+    dry_run: bool,
+    remove_data: bool | None,
+    package_manager: str,
+) -> tuple[bool, bool, bool | None, str]:
+    args = [_normalize_dash_arg(arg) for arg in extra_args]
+    index = 0
+    unknown_args: list[str] = []
+    while index < len(args):
+        arg = args[index]
+        if arg == "--yes":
+            yes = True
+        elif arg == "--dry-run":
+            dry_run = True
+        elif arg == "--remove-data":
+            remove_data = True
+        elif arg == "--keep-data":
+            remove_data = False
+        elif arg == "--package-manager":
+            index += 1
+            if index >= len(args):
+                error_console.print("[red]Error:[/red] --package-manager needs a value.")
+                raise typer.Exit(2)
+            package_manager = args[index]
+        elif arg.startswith("--package-manager="):
+            package_manager = arg.split("=", 1)[1]
+        else:
+            unknown_args.append(arg)
+        index += 1
+
+    if unknown_args:
+        error_console.print(
+            "[red]Error:[/red] Unknown uninstall argument(s): " + ", ".join(unknown_args)
+        )
+        raise typer.Exit(2)
+
+    return yes, dry_run, remove_data, package_manager
 
 
 def _fail(exc: Exception) -> None:

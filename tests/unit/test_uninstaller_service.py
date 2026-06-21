@@ -38,6 +38,23 @@ def test_uninstall_plan_falls_back_to_pip_without_pipx() -> None:
     )
 
 
+def test_uninstall_plan_uses_pip_directly_when_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("netorium.services.uninstaller.sys.frozen", True, raising=False)
+    plan = build_uninstall_plan(
+        executable="/usr/bin/python",
+        which=lambda command: "/usr/bin/pip" if command == "pip" else None,
+        package_manager="pip",
+    )
+
+    assert plan.package_manager == "pip"
+    assert plan.package_command == (
+        "pip",
+        "uninstall",
+        "-y",
+        "netorium-cli",
+    )
+
+
 def test_uninstall_plan_rejects_unknown_package_manager() -> None:
     with pytest.raises(UninstallError, match="Package manager must be"):
         build_uninstall_plan(package_manager="brew")

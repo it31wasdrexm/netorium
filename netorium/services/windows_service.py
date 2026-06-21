@@ -8,14 +8,15 @@ from collections.abc import Sequence
 def format_sc_binpath(executable: str, args: Sequence[str]) -> str:
     """Format the binPath value for ``sc.exe create``.
 
-    ``sc.exe`` treats the first quoted segment as the full binPath when the
-    executable path itself is quoted. The entire service command line must stay
-    in one binPath value, with escaped inner quotes when the executable path
-    contains spaces.
+    When the executable path contains spaces, it is wrapped in double quotes
+    so that ``sc.exe`` / the SCM correctly identifies the executable boundary
+    from its arguments.  These inner quotes are then properly escaped by
+    :func:`subprocess.list2cmdline` when the command is run as a list via
+    :func:`subprocess.run`.
     """
     arg_string = " ".join(args)
     if " " in executable:
-        return f'\\"{executable}\\" {arg_string}'
+        return f'"{executable}" {arg_string}'
     return f"{executable} {arg_string}"
 
 

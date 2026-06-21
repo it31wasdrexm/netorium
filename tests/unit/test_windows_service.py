@@ -18,7 +18,7 @@ def test_format_sc_binpath_escapes_executable_paths_with_spaces() -> None:
     args = ["controller", "start", "--host", "0.0.0.0", "--port", "8765"]
 
     assert format_sc_binpath(executable, args) == (
-        r"\"C:\Program Files\Netorium\netorium.exe\" "
+        r'"C:\Program Files\Netorium\netorium.exe" '
         "controller start --host 0.0.0.0 --port 8765"
     )
 

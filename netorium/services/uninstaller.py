@@ -158,11 +158,23 @@ def _build_package_command(
         return "pipx", ("pipx", "uninstall", package_name)
 
     if package_manager == "pip":
+        if getattr(sys, "frozen", False):
+            if which("pip") is not None:
+                return "pip", ("pip", "uninstall", "-y", package_name)
+            raise UninstallError(
+                "Cannot uninstall: frozen executable detected and pip not found on PATH."
+            )
         return "pip", (executable, "-m", "pip", "uninstall", "-y", package_name)
 
     if which("pipx") is not None:
         return "pipx", ("pipx", "uninstall", package_name)
 
+    if getattr(sys, "frozen", False):
+        if which("pip") is not None:
+            return "pip", ("pip", "uninstall", "-y", package_name)
+        raise UninstallError(
+            "Cannot uninstall: frozen executable detected and pip not found on PATH."
+        )
     return "pip", (executable, "-m", "pip", "uninstall", "-y", package_name)
 
 

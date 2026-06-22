@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from netorium.core.settings import ConfigError, default_config_path, load_settings
+from netorium.core.settings import ConfigError, load_settings
 from netorium.services.update_checker import (
     DEFAULT_GITHUB_REPO,
     DEFAULT_PACKAGE_NAME,
@@ -33,8 +33,6 @@ def get_startup_update_notice(
     try:
         settings = load_settings()
     except ConfigError:
-        if default_config_path().exists():
-            return None
         config = build_update_config(
             source="github",
             repo=DEFAULT_GITHUB_REPO,

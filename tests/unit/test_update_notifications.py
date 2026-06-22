@@ -48,6 +48,31 @@ def test_startup_notice_uses_default_repo_without_config(
     assert client.urls == ["https://api.github.com/repos/it31wasdrexm/netorium/releases/latest"]
 
 
+def test_startup_notice_uses_default_repo_with_old_invalid_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_dir = isolated_config_dir(tmp_path)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        "[app]\ndatabase_path = '~/.local/share/netorium/netorium.db'\n",
+        encoding="utf-8",
+    )
+    for key, value in isolated_user_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    client = FakeClient()
+
+    notice = get_startup_update_notice(
+        client=client,
+        current_version="0.1.0",
+        system_name="Linux",
+    )
+
+    assert notice is not None
+    assert notice.info.latest_version == "0.2.0"
+    assert client.urls == ["https://api.github.com/repos/it31wasdrexm/netorium/releases/latest"]
+
+
 def test_startup_notice_skips_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,12 @@ def build_uninstall_plan(
                 ]
             )
             package_command = None
+    elif package_command is not None and resolved_manager in {"pipx", "pip"}:
+        package_command_detached = True
+        package_command = _build_deferred_package_command(
+            package_command,
+            platform_name=active_platform,
+        )
 
     return UninstallPlan(
         package_name=package_name,
@@ -307,6 +314,19 @@ def _windows_deferred_remove_command(
         )
         commands.append(f"if exist {quoted_path} del /f /q {quoted_path} >nul 2>nul")
     return ("cmd.exe", "/d", "/c", " & ".join(commands))
+
+
+def _build_deferred_package_command(
+    command: tuple[str, ...],
+    *,
+    platform_name: str,
+) -> tuple[str, ...]:
+    if platform_name.startswith("win"):
+        package_command = format_command(command)
+        return ("cmd.exe", "/d", "/c", f"timeout /t 3 /nobreak >nul & {package_command}")
+
+    shell_command = "sleep 3; " + " ".join(shlex.quote(part) for part in command)
+    return ("sh", "-c", shell_command)
 
 
 def _read_configured_database_path(config_path: Path) -> Path | None:

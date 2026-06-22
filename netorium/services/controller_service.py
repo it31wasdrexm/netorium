@@ -21,7 +21,13 @@ import sys
 import textwrap
 from pathlib import Path
 
-from netorium.services.windows_service import build_sc_config_command, build_sc_create_command
+from netorium.services.windows_background import (
+    build_firewall_add_command,
+    build_firewall_delete_command,
+    build_schtasks_create_command,
+    build_schtasks_delete_command,
+    build_schtasks_run_command,
+)
 
 
 class ControllerServiceError(RuntimeError):
@@ -164,6 +170,8 @@ def uninstall_services_silently() -> None:
             _run_optional(["sc", "delete", "NetoriumController"])
             _run_optional(["sc", "stop", "NetoriumAgent"])
             _run_optional(["sc", "delete", "NetoriumAgent"])
+            _run_optional(build_schtasks_delete_command("NetoriumController"))
+            _run_optional(build_schtasks_delete_command("NetoriumAgent"))
         elif sys.platform.startswith("linux"):
             _run_optional(["sudo", "systemctl", "stop", "netorium-controller"])
             _run_optional(["sudo", "systemctl", "disable", "netorium-controller"])
@@ -369,6 +377,7 @@ def _uninstall_launchd() -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 _WINDOWS_SERVICE_NAME = "NetoriumController"
+_WINDOWS_TASK_NAME = "NetoriumController"
 
 
 def _install_windows_service(host: str, port: int) -> str:
@@ -378,59 +387,56 @@ def _install_windows_service(host: str, port: int) -> str:
     nssm = shutil.which("nssm")
     if nssm:
         return _install_windows_nssm(nssm, executable, host, port)
-    return _install_windows_sc(executable, host, port)
+    return _install_windows_task(executable, host, port)
 
 
 def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> str:
     svc = _WINDOWS_SERVICE_NAME
     _remove_windows_service(svc, nssm=nssm)
     _run([nssm, "install", svc, executable,
-          "controller", "start", "--host", host, "--port", str(port)])
+          "controller", "start", "--host", host, "--port", str(port), "--quiet"])
     _run([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
     _run([nssm, "set", svc, "AppStdout", r"C:\ProgramData\Netorium\controller.log"])
     _run([nssm, "set", svc, "AppStderr", r"C:\ProgramData\Netorium\controller.err"])
+    _run_optional(build_firewall_add_command(port))
     _run([nssm, "start", svc])
     return (
         f"Windows service '{svc}' installed and started with NSSM.\n"
         f"  Status:  sc query {svc}\n"
+        f"  Firewall: inbound TCP port {port} allowed.\n"
         f"  Logs:    C:\\ProgramData\\Netorium\\controller.log\n"
         f"  Stop:    sc stop {svc}\n"
         f"  Remove:  netorium controller uninstall-service"
     )
 
 
-def _install_windows_sc(executable: str, host: str, port: int) -> str:
-    svc = _WINDOWS_SERVICE_NAME
-    controller_args = ["controller", "start", "--host", host, "--port", str(port)]
-    display_name = "Netorium Controller"
-    if _windows_service_exists(svc):
-        _run_optional(["sc.exe", "stop", svc])
-        _run(
-            build_sc_config_command(
-                svc,
-                executable,
-                controller_args,
-                display_name=display_name,
-            )
+def _install_windows_task(executable: str, host: str, port: int) -> str:
+    task = _WINDOWS_TASK_NAME
+    controller_args = ["controller", "start", "--host", host, "--port", str(port), "--quiet"]
+    _remove_windows_task(task)
+    _run(
+        build_schtasks_create_command(
+            task,
+            executable,
+            controller_args,
         )
-    else:
-        _run(
-            build_sc_create_command(
-                svc,
-                executable,
-                controller_args,
-                display_name=display_name,
-            )
-        )
-    _run(["sc.exe", "start", svc])
+    )
+    _run_optional(build_firewall_add_command(port))
+    _run(build_schtasks_run_command(task))
     return (
-        f"Windows service '{svc}' installed and started with sc.exe.\n"
-        f"  Status:  sc query {svc}\n"
-        f"  Stop:    sc stop {svc}\n"
+        f"Windows scheduled task '{task}' installed and started.\n"
+        f"  Runs at logon and starts the controller in the background.\n"
+        f"  Firewall: inbound TCP port {port} allowed.\n"
+        f"  Status:  schtasks /Query /TN {task}\n"
+        f"  Stop:    taskkill /IM netorium.exe /F\n"
         f"  Remove:  netorium controller uninstall-service\n"
         "\n"
-        "  Tip: Install NSSM (https://nssm.cc) for better log capture."
+        "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
     )
+
+
+def _remove_windows_task(task_name: str) -> None:
+    _run_optional(build_schtasks_delete_command(task_name))
 
 
 def _remove_windows_service(svc: str, *, nssm: str | None = None) -> None:
@@ -443,27 +449,17 @@ def _remove_windows_service(svc: str, *, nssm: str | None = None) -> None:
     _run_optional(["sc.exe", "delete", svc])
 
 
-def _windows_service_exists(svc: str) -> bool:
-    try:
-        completed = subprocess.run(
-            ["sc.exe", "query", svc],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        return False
-    return completed.returncode == 0
-
-
 def _uninstall_windows_service() -> str:
     svc = _WINDOWS_SERVICE_NAME
+    task = _WINDOWS_TASK_NAME
     nssm = shutil.which("nssm")
     if nssm:
         _remove_windows_service(svc, nssm=nssm)
     else:
-        _remove_windows_service(svc)
-    return f"Windows service '{svc}' stopped and removed."
+        _remove_windows_task(task)
+    _remove_windows_service(svc)
+    _run_optional(build_firewall_delete_command())
+    return f"Windows controller background task/service '{task}' stopped and removed."
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -521,14 +517,18 @@ def _service_command_hint(cmd: list[str], output: str) -> str:
         return ""
 
     command_name = Path(cmd[0]).name.lower()
-    if command_name not in {"sc", "sc.exe"}:
+    if command_name in {"sc", "sc.exe"}:
+        normalized_output = output.lower()
+        if "access is denied" in normalized_output or "отказано в доступе" in normalized_output:
+            return "Hint: open Windows Terminal or PowerShell as Administrator, then run this command again."
+        if "already exists" in normalized_output or "уже существует" in normalized_output:
+            return "Hint: remove the old service first with: netorium controller uninstall-service"
         return ""
 
-    normalized_output = output.lower()
-    if "access is denied" in normalized_output or "отказано в доступе" in normalized_output:
-        return "Hint: open Windows Terminal or PowerShell as Administrator, then run this command again."
-    if "already exists" in normalized_output or "уже существует" in normalized_output:
-        return "Hint: remove the old service first with: netorium controller uninstall-service"
+    if command_name == "schtasks":
+        normalized_output = output.lower()
+        if "access is denied" in normalized_output or "отказано в доступе" in normalized_output:
+            return "Hint: open Windows Terminal or PowerShell as Administrator, then run this command again."
     return ""
 
 

@@ -24,7 +24,12 @@ from netorium.services.endpoint_policy import (
     apply_site_policy,
     apply_speed_policy,
 )
-from netorium.services.windows_service import build_sc_create_command
+from netorium.services.windows_background import (
+    build_schtasks_create_command,
+    build_schtasks_delete_command,
+    build_schtasks_end_command,
+    build_schtasks_run_command,
+)
 from netorium.services.controller_service import reexec_windows_admin_if_needed
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -115,6 +120,17 @@ def enroll_agent(
             json={"token": clean_token, "hostname": clean_hostname},
             timeout=timeout,
         )
+    except requests.Timeout as exc:
+        raise AgentError(
+            "Could not reach controller enrollment endpoint: connection timed out.\n"
+            f"  URL: {enroll_url}\n"
+            "  Check on the controller PC:\n"
+            "    - controller is running (`netorium controller status`)\n"
+            "    - background service is installed (`netorium controller install-service`)\n"
+            "    - Windows firewall allows inbound TCP on the controller port\n"
+            "  On this PC, verify network access with:\n"
+            f"    curl {clean_controller_url}/health"
+        ) from exc
     except requests.RequestException as exc:
         raise AgentError(f"Could not reach controller enrollment endpoint: {exc}") from exc
 
@@ -277,6 +293,7 @@ _SYSTEMD_USER_DIR = Path("~/.config/systemd/user").expanduser()
 _LAUNCHD_LABEL = "com.netorium.agent"
 _LAUNCHD_PLIST_DIR = Path("~/Library/LaunchAgents").expanduser()
 _WINDOWS_SERVICE_NAME = "NetoriumAgent"
+_WINDOWS_TASK_NAME = "NetoriumAgent"
 
 
 def service_action(action: str) -> str:
@@ -460,45 +477,48 @@ def _windows_service_action(action: str) -> str:
                 f"  Logs:    C:\\ProgramData\\Netorium\\agent.log\n"
                 f"  Remove:  netorium agent service uninstall"
             )
-        else:
-            _run_service_cmd(
-                build_sc_create_command(
-                    svc,
-                    executable,
-                    ["agent", "run-loop"],
-                    display_name="Netorium Agent",
-                )
+
+        task = _WINDOWS_TASK_NAME
+        _run_service_cmd_optional(build_schtasks_delete_command(task))
+        _run_service_cmd(
+            build_schtasks_create_command(
+                task,
+                executable,
+                ["agent", "run-loop"],
             )
-            _run_service_cmd(["sc", "start", svc])
-            return (
-                f"[Windows/sc.exe] Agent service '{svc}' installed and started.\n"
-                f"  Status:  sc query {svc}\n"
-                f"  Remove:  netorium agent service uninstall\n"
-                "  Tip: Install NSSM (https://nssm.cc) for better log capture."
-            )
+        )
+        _run_service_cmd(build_schtasks_run_command(task))
+        return (
+            f"[Windows] Agent scheduled task '{task}' installed and started.\n"
+            f"  Runs at logon and keeps the agent connected in the background.\n"
+            f"  Status:  schtasks /Query /TN {task}\n"
+            f"  Remove:  netorium agent service uninstall\n"
+            "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
+        )
 
     if action == "start":
         if nssm:
             _run_service_cmd([nssm, "start", svc])
         else:
-            _run_service_cmd(["sc", "start", svc])
-        return f"[Windows] Agent service '{svc}' started."
+            _run_service_cmd(build_schtasks_run_command(_WINDOWS_TASK_NAME))
+        return f"[Windows] Agent background task/service started."
 
     if action == "stop":
         if nssm:
             _run_service_cmd([nssm, "stop", svc])
         else:
-            _run_service_cmd(["sc", "stop", svc])
-        return f"[Windows] Agent service '{svc}' stopped."
+            _run_service_cmd_optional(build_schtasks_end_command(_WINDOWS_TASK_NAME))
+        return "[Windows] Agent background task/service stopped."
 
     if action == "uninstall":
         if nssm:
             _run_service_cmd_optional([nssm, "stop", svc])
             _run_service_cmd_optional([nssm, "remove", svc, "confirm"])
         else:
-            _run_service_cmd_optional(["sc", "stop", svc])
-            _run_service_cmd_optional(["sc", "delete", svc])
-        return f"[Windows] Agent service '{svc}' removed."
+            _run_service_cmd_optional(build_schtasks_delete_command(_WINDOWS_TASK_NAME))
+        _run_service_cmd_optional(["sc", "stop", svc])
+        _run_service_cmd_optional(["sc", "delete", svc])
+        return f"[Windows] Agent background task/service removed."
 
     raise AgentError(f"Unknown service action: {action}")
 
@@ -770,6 +790,8 @@ def _write_state(state: AgentState) -> None:
 
 def _normalize_controller_url(controller_url: str) -> str:
     clean_url = controller_url.strip().rstrip("/")
+    if clean_url.lower().endswith("/enroll"):
+        clean_url = clean_url[: -len("/enroll")]
     parsed = urlparse(clean_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise AgentError("Controller URL must include http:// or https:// and a host.")

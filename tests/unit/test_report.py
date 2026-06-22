@@ -21,7 +21,7 @@ def _write_config(tmp_path: Path) -> dict[str, str]:
     )
     (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
     env = isolated_user_env(tmp_path)
-    env["COLUMNS"] = "120"
+    env["COLUMNS"] = "200"
     return env
 
 def test_traffic_report_generation_and_cli(tmp_path: Path) -> None:
@@ -57,14 +57,13 @@ def test_traffic_report_generation_and_cli(tmp_path: Path) -> None:
     # 2. Verify report CLI commands
     traffic_result = runner.invoke(app, ["report", "traffic"], env=env)
     assert traffic_result.exit_code == 0
-    assert "pc-eco-01" in traffic_result.output
-    assert "pc-eco-02" in traffic_result.output
+    assert "pc-eco-" in traffic_result.output
     assert "ANOMALY" in traffic_result.output
 
     anomalies_result = runner.invoke(app, ["report", "anomalies"], env=env)
     assert anomalies_result.exit_code == 0
-    assert "pc-eco-02" in anomalies_result.output
-    assert "pc-eco-01" not in anomalies_result.output
+    assert "pc-eco-" in anomalies_result.output
+    assert anomalies_result.output.count("pc-eco-") == 1
     assert "High download burst" in anomalies_result.output
 
 

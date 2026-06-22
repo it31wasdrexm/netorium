@@ -17,7 +17,8 @@ def test_uninstall_plan_uses_pipx_when_available() -> None:
     )
 
     assert plan.package_manager == "pipx"
-    assert plan.package_command == ("pipx", "uninstall", "netorium-cli")
+    assert plan.package_command_detached is True
+    assert plan.package_command == ("sh", "-c", "sleep 3; pipx uninstall netorium-cli")
     assert plan.path_targets == ()
 
 
@@ -28,13 +29,11 @@ def test_uninstall_plan_falls_back_to_pip_without_pipx() -> None:
     )
 
     assert plan.package_manager == "pip"
+    assert plan.package_command_detached is True
     assert plan.package_command == (
-        "/usr/bin/python",
-        "-m",
-        "pip",
-        "uninstall",
-        "-y",
-        "netorium-cli",
+        "sh",
+        "-c",
+        "sleep 3; /usr/bin/python -m pip uninstall -y netorium-cli",
     )
 
 
@@ -47,11 +46,11 @@ def test_uninstall_plan_uses_pip_directly_when_frozen(monkeypatch: pytest.Monkey
     )
 
     assert plan.package_manager == "pip"
+    assert plan.package_command_detached is True
     assert plan.package_command == (
-        "pip",
-        "uninstall",
-        "-y",
-        "netorium-cli",
+        "sh",
+        "-c",
+        "sleep 3; pip uninstall -y netorium-cli",
     )
 
 

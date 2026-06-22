@@ -121,6 +121,31 @@ def test_agent_enroll_rejects_invalid_controller_url(tmp_path: Path) -> None:
         )
 
 
+def test_agent_enroll_strips_trailing_enroll_path(tmp_path: Path) -> None:
+    client = FakeClient(
+        FakeResponse(
+            200,
+            {
+                "agent_id": "agt_123",
+                "device_token": "ng_device_secret",
+                "hostname": "pc-acc-01",
+                "zone": "accounting",
+                "enrolled_at": "2026-06-16T10:00:00+00:00",
+            },
+        )
+    )
+
+    enroll_agent(
+        controller_url="http://192.168.1.10:8765/enroll",
+        token="ng_enroll_secret",
+        hostname="pc-acc-01",
+        state_path=tmp_path / "agent.json",
+        client=client,
+    )
+
+    assert client.requests[0][0] == "http://192.168.1.10:8765/enroll"
+
+
 def test_agent_enroll_reports_controller_failure(tmp_path: Path) -> None:
     client = FakeClient(FakeResponse(400, {"error": "bad"}, text="bad token"))
 

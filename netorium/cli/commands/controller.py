@@ -131,6 +131,10 @@ def start(
         int,
         typer.Option("--port", help="Controller listen port."),
     ] = DEFAULT_CONTROLLER_PORT,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", help="Suppress startup messages for background runs."),
+    ] = False,
 ) -> None:
     """Start the local controller HTTP process."""
     try:
@@ -145,15 +149,17 @@ def start(
         )
         raise typer.Exit(1)
 
-    console.print("Starting Netorium Controller.")
-    console.print(f"Listen: http://{host}:{port}")
-    console.print(f"Enrollment URL: {build_enrollment_url(host, port)}")
-    console.print("Press Ctrl+C to stop.")
+    if not quiet:
+        console.print("Starting Netorium Controller.")
+        console.print(f"Listen: http://{host}:{port}")
+        console.print(f"Enrollment URL: {build_enrollment_url(host, port)}")
+        console.print("Press Ctrl+C to stop.")
 
     try:
         serve_controller(database_path, host=host, port=port)
     except KeyboardInterrupt:
-        console.print("Netorium Controller stopped.")
+        if not quiet:
+            console.print("Netorium Controller stopped.")
     except (DatabaseError, ControllerError) as exc:
         _fail(exc)
 

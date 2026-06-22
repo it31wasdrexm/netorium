@@ -72,9 +72,9 @@ def test_interactive_shell_runs_commands_without_prefix(monkeypatch: pytest.Monk
     result = runner.invoke(app, [], input="version\nexit\n")
 
     assert result.exit_code == 0
-    assert "Interactive command center" in result.output
+    assert "Netorium Command Center" in result.output
     assert "Common Commands" in result.output
-    assert "controller install-service" in result.output
+    assert "install-service" in result.output
     assert "update check" in result.output
     assert "netorium>" in result.output
     assert f"{APP_NAME} {get_version()}" in result.output
@@ -125,10 +125,27 @@ def test_interactive_shell_shows_startup_update_notice(
     result = runner.invoke(app, [], input="exit\n")
 
     assert result.exit_code == 0
-    assert "Netorium Update" in result.output
-    assert "Update available" in result.output
+    assert "Netorium Update Available" in result.output
+    assert "0.1.0 ->" in result.output
     assert "0.2.0" in result.output
     assert "curl -fsSL https://example.test/install.sh | bash" in result.output
+
+
+def test_interactive_shell_exits_after_uninstall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(app_module, "get_startup_update_notice", lambda: None)
+    env = _write_uninstall_config(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [],
+        env=env,
+        input="uninstall --package-manager none --yes --remove-data\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Netorium uninstall completed." in result.output
+    assert "Exiting Netorium." in result.output
+    assert "Leaving Netorium." not in result.output
 
 
 def test_uninstall_dry_run_shows_plan(tmp_path: Path) -> None:

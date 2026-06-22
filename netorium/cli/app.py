@@ -111,7 +111,9 @@ def _run_interactive_command(args: list[str]) -> None:
     click_command = get_command(app)
     try:
         click_command.main(args=args, prog_name="netorium", standalone_mode=False)
-    except SystemExit:
+    except SystemExit as exc:
+        if args and args[0].lower() in {"uninstall", "unistall"} and exc.code in (None, 0):
+            raise
         return
     except Exception as exc:
         if exc.__class__.__name__ == "Exit":
@@ -126,8 +128,8 @@ def _run_interactive_command(args: list[str]) -> None:
 
 
 def _run_interactive_shell() -> None:
-    _render_interactive_header()
     _render_startup_update_notice()
+    _render_interactive_header()
 
     while True:
         try:
@@ -175,21 +177,30 @@ def _run_interactive_sudo(args: list[str]) -> None:
 
 
 def _render_interactive_header() -> None:
+    overview = Table.grid(padding=(0, 2))
+    overview.add_column(style="cyan")
+    overview.add_column()
+    overview.add_row("Version", get_version())
+    overview.add_row("Platform", platform.system() or "unknown")
+    overview.add_row("Config", str(default_config_path()))
+
     console.print(
-        Panel.fit(
-            f"[bold]{APP_NAME} {get_version()}[/]\n"
-            "Interactive command center for the local controller and endpoint policies.",
+        Panel(
+            overview,
             title="Netorium Command Center",
+            subtitle="local controller and endpoint policies",
             border_style="cyan",
+            expand=False,
         )
     )
-    shortcuts = Table(title="Common Commands", box=box.SIMPLE, show_header=True)
+    shortcuts = Table(title="Common Commands", box=box.SIMPLE_HEAVY, show_header=True)
     shortcuts.add_column("Task", style="cyan")
     shortcuts.add_column("Command")
-    shortcuts.add_row("Controller", "controller status | controller install-service")
-    shortcuts.add_row("Updates", "update check | update install")
-    shortcuts.add_row("Cleanup", "uninstall | uninstall --remove-data")
-    shortcuts.add_row("Help", "help | help controller | exit")
+    shortcuts.add_column("Use")
+    shortcuts.add_row("Controller", "controller status | controller install-service", "run in background")
+    shortcuts.add_row("Updates", "update check | update install", "check or install latest")
+    shortcuts.add_row("Cleanup", "uninstall | uninstall --remove-data", "remove CLI cleanly")
+    shortcuts.add_row("Help", "help | help controller | exit", "navigate commands")
     console.print(shortcuts)
 
 
@@ -203,15 +214,23 @@ def _render_startup_update_notice() -> None:
 
 def _startup_update_panel(notice: StartupUpdateNotice) -> Panel:
     platform = notice.platform
-    body = (
-        f"[bold yellow]Update available:[/] {notice.info.latest_version}\n"
-        f"Current version: {notice.info.current_version}\n"
-        f"Platform: {platform.platform_name}\n"
-        f"Run: [bold]{platform.install_command}[/]\n"
-        f"Standalone: {platform.standalone_command}\n"
-        f"Release: {notice.info.release_url}"
+    body = Table.grid(padding=(0, 2))
+    body.add_column(style="yellow")
+    body.add_column()
+    body.add_row(
+        "Update",
+        f"{notice.info.current_version} -> [bold]{notice.info.latest_version}[/]",
     )
-    return Panel.fit(body, title="Netorium Update", border_style="yellow")
+    body.add_row("Platform", platform.platform_name)
+    body.add_row("Install", f"[bold]{platform.install_command}[/]")
+    body.add_row("Standalone", platform.standalone_command)
+    body.add_row("Release", notice.info.release_url)
+    return Panel(
+        body,
+        title="Netorium Update Available",
+        border_style="yellow",
+        expand=False,
+    )
 
 
 @app.callback(invoke_without_command=True)
@@ -353,6 +372,8 @@ def _execute_uninstall(*, remove_data: bool, package_manager: str) -> None:
         _fail(exc)
 
     _render_uninstall_result(result)
+    console.print("Exiting Netorium.")
+    sys.exit(0)
 
 
 def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:

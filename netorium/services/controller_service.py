@@ -21,6 +21,13 @@ import sys
 import textwrap
 from pathlib import Path
 
+from netorium.services.linux_service_runtime import (
+    LinuxServiceRuntime,
+    build_sudo_reexec_command,
+    resolve_linux_service_runtime,
+    systemd_environment_lines,
+    systemd_service_account_lines,
+)
 from netorium.services.windows_background import (
     build_firewall_add_command,
     build_firewall_delete_command,
@@ -109,18 +116,18 @@ def reexec_system_install_if_needed(
         return
 
     executable = resolve_netorium_executable()
-    command = [
-        executable,
-        "controller",
-        "install-service",
-        "--system",
-        "--host",
-        host,
-        "--port",
-        str(port),
-    ]
     try:
-        os.execvp("sudo", ["sudo", *command])
+        os.execvp("sudo", build_sudo_reexec_command(
+            argv_tail=[
+                "controller",
+                "install-service",
+                "--system",
+                "--host",
+                host,
+                "--port",
+                str(port),
+            ],
+        ))
     except FileNotFoundError as exc:
         raise ControllerServiceError(
             "sudo was not found. Install sudo or run the install command as root:\n"
@@ -204,7 +211,11 @@ def _systemd_user_dir() -> Path:
     return Path("~/.config/systemd/user").expanduser()
 
 
-def _systemd_unit_content(executable: str, host: str, port: int) -> str:
+def _systemd_unit_content(runtime: LinuxServiceRuntime, *, system: bool) -> str:
+    service_lines = systemd_service_account_lines(runtime) if system else []
+    environment_lines = systemd_environment_lines(runtime, system=system)
+    indented_service = "".join(f"        {line}\n" for line in service_lines)
+    indented_environment = "".join(f"        {line}\n" for line in environment_lines)
     return textwrap.dedent(f"""\
         [Unit]
         Description=Netorium Controller
@@ -213,7 +224,7 @@ def _systemd_unit_content(executable: str, host: str, port: int) -> str:
 
         [Service]
         Type=simple
-        ExecStart={executable} controller start --host {host} --port {port}
+{indented_service}{indented_environment}        ExecStart={runtime.exec_start}
         Restart=on-failure
         RestartSec=10
         StandardOutput=journal
@@ -224,7 +235,9 @@ def _systemd_unit_content(executable: str, host: str, port: int) -> str:
     """)
 
 
-def _systemd_user_unit_content(executable: str, host: str, port: int) -> str:
+def _systemd_user_unit_content(runtime: LinuxServiceRuntime) -> str:
+    environment_lines = systemd_environment_lines(runtime, system=False)
+    indented_environment = "".join(f"        {line}\n" for line in environment_lines)
     return textwrap.dedent(f"""\
         [Unit]
         Description=Netorium Controller
@@ -232,7 +245,7 @@ def _systemd_user_unit_content(executable: str, host: str, port: int) -> str:
 
         [Service]
         Type=simple
-        ExecStart={executable} controller start --host {host} --port {port}
+{indented_environment}        ExecStart={runtime.exec_start}
         Restart=on-failure
         RestartSec=10
 
@@ -242,6 +255,9 @@ def _systemd_user_unit_content(executable: str, host: str, port: int) -> str:
 
 
 def _install_systemd(host: str, port: int, *, system: bool) -> str:
+    runtime = resolve_linux_service_runtime(
+        argv_tail=["controller", "start", "--host", host, "--port", str(port), "--quiet"],
+    )
     executable = resolve_netorium_executable()
 
     # System units require root. User units are the default for non-root installs.
@@ -254,39 +270,40 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
     if is_root or system:
         unit_dir = _SYSTEMD_SYSTEM_DIR
         unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
-        content = _systemd_unit_content(executable, host, port)
+        content = _systemd_unit_content(runtime, system=True)
         _write_file_root(unit_file, content)
         _run(["systemctl", "daemon-reload"])
         _run(["systemctl", "enable", "--now", _SYSTEMD_SERVICE_NAME])
         return (
             f"System service installed and started: {unit_file}\n"
+            f"  Runs as: {runtime.service_user}\n"
             f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}\n"
             f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f\n"
             f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}\n"
             f"  Remove:  netorium controller uninstall-service"
         )
-    else:
-        unit_dir = _systemd_user_dir()
-        unit_dir.mkdir(parents=True, exist_ok=True)
-        unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
-        content = _systemd_user_unit_content(executable, host, port)
-        unit_file.write_text(content, encoding="utf-8")
-        _run(["systemctl", "--user", "daemon-reload"])
-        _run(["systemctl", "--user", "enable", "--now", _SYSTEMD_SERVICE_NAME])
-        # Enable lingering so the service survives after logout
-        username = os.environ.get("USER") or os.environ.get("USERNAME") or ""
-        if username:
-            _run_optional(["loginctl", "enable-linger", username])
-        return (
-            f"User service installed and started: {unit_file}\n"
-            f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
-            f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
-            f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
-            f"  Remove:  netorium controller uninstall-service\n"
-            "\n"
-            "  Tip: Install a system-wide service that survives logout with:\n"
-            f"  {executable} controller install-service --system"
-        )
+
+    unit_dir = _systemd_user_dir()
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
+    content = _systemd_user_unit_content(runtime)
+    unit_file.write_text(content, encoding="utf-8")
+    _run(["systemctl", "--user", "daemon-reload"])
+    _run(["systemctl", "--user", "enable", "--now", _SYSTEMD_SERVICE_NAME])
+    # Enable lingering so the service survives after logout
+    username = os.environ.get("USER") or os.environ.get("USERNAME") or ""
+    if username:
+        _run_optional(["loginctl", "enable-linger", username])
+    return (
+        f"User service installed and started: {unit_file}\n"
+        f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
+        f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
+        f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
+        f"  Remove:  netorium controller uninstall-service\n"
+        "\n"
+        "  Tip: Install a system-wide service that survives logout with:\n"
+        f"  {executable} controller install-service --system"
+    )
 
 
 def _uninstall_systemd() -> str:

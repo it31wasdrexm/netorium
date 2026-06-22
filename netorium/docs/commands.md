@@ -106,9 +106,11 @@ rights. Windows QoS throttles outbound traffic; reliable download limiting needs
 a router, gateway, or future packet-filter adapter.
 
 `controller install-service` registers a background service on Linux (systemd),
-Windows (sc.exe or NSSM), or macOS (launchd). On Linux, the default user service
-works without root; pass `--system` to install a system-wide unit and let
-Netorium re-exec itself under sudo with the resolved executable path. On
+Windows (Task Scheduler or NSSM), or macOS (launchd). On Linux, the default user
+service works without root; pass `--system` to install a system-wide unit.
+Netorium re-execs under `sudo` with `python -m netorium` and the correct
+`PYTHONPATH` for pip, pipx, and editable installs. The system unit runs as the
+installing user account.
 Windows, run PowerShell or Windows Terminal as Administrator before calling
 `netorium controller install-service`; remove an old service first with
 `netorium controller uninstall-service` if Windows reports that it already

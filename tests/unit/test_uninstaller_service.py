@@ -22,7 +22,10 @@ def test_uninstall_plan_uses_pipx_when_available() -> None:
     assert plan.path_targets == ()
 
 
-def test_uninstall_plan_falls_back_to_pip_without_pipx() -> None:
+def test_uninstall_plan_falls_back_to_pip_without_pipx(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("netorium.services.uninstaller._is_externally_managed_python", lambda: True)
     plan = build_uninstall_plan(
         executable="/usr/bin/python",
         which=lambda _command: None,
@@ -33,12 +36,28 @@ def test_uninstall_plan_falls_back_to_pip_without_pipx() -> None:
     assert plan.package_command == (
         "sh",
         "-c",
-        "sleep 3; /usr/bin/python -m pip uninstall -y netorium-cli",
+        "sleep 3; /usr/bin/python -m pip uninstall -y netorium-cli --break-system-packages",
     )
 
 
-def test_uninstall_plan_uses_pip_directly_when_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_uninstall_plan_includes_launcher_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("netorium.services.uninstaller._is_externally_managed_python", lambda: False)
+    plan = build_uninstall_plan(
+        executable="/usr/bin/python",
+        which=lambda command: "/home/user/.local/bin/netorium" if command == "netorium" else None,
+    )
+
+    assert plan.package_command is not None
+    assert "rm -f /home/user/.local/bin/netorium" in plan.package_command[2]
+
+
+def test_uninstall_plan_uses_pip_directly_when_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("netorium.services.uninstaller.sys.frozen", True, raising=False)
+    monkeypatch.setattr("netorium.services.uninstaller._is_externally_managed_python", lambda: True)
     plan = build_uninstall_plan(
         executable="/usr/bin/python",
         which=lambda command: "/usr/bin/pip" if command == "pip" else None,
@@ -50,7 +69,7 @@ def test_uninstall_plan_uses_pip_directly_when_frozen(monkeypatch: pytest.Monkey
     assert plan.package_command == (
         "sh",
         "-c",
-        "sleep 3; pip uninstall -y netorium-cli",
+        "sleep 3; pip uninstall -y netorium-cli --break-system-packages",
     )
 
 

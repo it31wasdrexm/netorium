@@ -24,13 +24,14 @@ from netorium.services.endpoint_policy import (
     apply_site_policy,
     apply_speed_policy,
 )
+from netorium.services.controller_service import reexec_windows_admin_if_needed
+from netorium.services.linux_service_runtime import resolve_linux_service_runtime
 from netorium.services.windows_background import (
     build_schtasks_create_command,
     build_schtasks_delete_command,
     build_schtasks_end_command,
     build_schtasks_run_command,
 )
-from netorium.services.controller_service import reexec_windows_admin_if_needed
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 COMMAND_TYPE_FIREWALL_IP = "firewall.ip"
@@ -339,7 +340,11 @@ def _find_netorium_executable() -> str:
 
 # ─── Linux / systemd ──────────────────────────────────────────────────────────
 
-def _systemd_unit_content(executable: str) -> str:
+def _systemd_unit_content(runtime) -> str:
+    environment_lines = "".join(
+        f"        Environment={key}={value}\n"
+        for key, value in runtime.environment
+    )
     return textwrap.dedent(f"""\
         [Unit]
         Description=Netorium Agent
@@ -347,7 +352,7 @@ def _systemd_unit_content(executable: str) -> str:
 
         [Service]
         Type=simple
-        ExecStart={executable} agent run-loop
+{environment_lines}        ExecStart={runtime.exec_start}
         Restart=always
         RestartSec=15
 
@@ -357,13 +362,13 @@ def _systemd_unit_content(executable: str) -> str:
 
 
 def _systemd_action(action: str) -> str:
-    executable = _find_netorium_executable()
+    runtime = resolve_linux_service_runtime(argv_tail=["agent", "run-loop"])
     unit_dir = _SYSTEMD_USER_DIR
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
 
     if action == "install":
-        unit_file.write_text(_systemd_unit_content(executable), encoding="utf-8")
+        unit_file.write_text(_systemd_unit_content(runtime), encoding="utf-8")
         _run_service_cmd(["systemctl", "--user", "daemon-reload"])
         _run_service_cmd(["systemctl", "--user", "enable", "--now", _SYSTEMD_SERVICE_NAME])
         username = os.environ.get("USER") or ""

@@ -134,6 +134,7 @@ def build_uninstall_plan(
         package_command = _build_deferred_package_command(
             package_command,
             platform_name=active_platform,
+            launcher_path=_resolve_launcher_path(active_which),
         )
 
     return UninstallPlan(
@@ -226,13 +227,7 @@ def _build_package_command(
         return "pipx", ("pipx", "uninstall", package_name)
 
     if package_manager == "pip":
-        if getattr(sys, "frozen", False):
-            if which("pip") is not None:
-                return "pip", ("pip", "uninstall", "-y", package_name)
-            raise UninstallError(
-                "Cannot uninstall: frozen executable detected and pip not found on PATH."
-            )
-        return "pip", (executable, "-m", "pip", "uninstall", "-y", package_name)
+        return "pip", _pip_uninstall_command(executable, package_name, which=which)
 
     if getattr(sys, "frozen", False):
         return "standalone", None
@@ -240,7 +235,7 @@ def _build_package_command(
     if which("pipx") is not None:
         return "pipx", ("pipx", "uninstall", package_name)
 
-    return "pip", (executable, "-m", "pip", "uninstall", "-y", package_name)
+    return "pip", _pip_uninstall_command(executable, package_name, which=which)
 
 
 def _windows_install_targets(
@@ -320,13 +315,71 @@ def _build_deferred_package_command(
     command: tuple[str, ...],
     *,
     platform_name: str,
+    launcher_path: Path | None = None,
 ) -> tuple[str, ...]:
+    launcher_cleanup = _launcher_cleanup_fragment(platform_name, launcher_path)
     if platform_name.startswith("win"):
         package_command = format_command(command)
-        return ("cmd.exe", "/d", "/c", f"timeout /t 3 /nobreak >nul & {package_command}")
+        body = "timeout /t 3 /nobreak >nul"
+        if package_command:
+            body = f"{body} & {package_command}"
+        if launcher_cleanup:
+            body = f"{body} & {launcher_cleanup}"
+        return ("cmd.exe", "/d", "/c", body)
 
-    shell_command = "sleep 3; " + " ".join(shlex.quote(part) for part in command)
-    return ("sh", "-c", shell_command)
+    shell_parts = ["sleep 3", " ".join(shlex.quote(part) for part in command)]
+    if launcher_cleanup:
+        shell_parts.append(launcher_cleanup)
+    return ("sh", "-c", "; ".join(shell_parts))
+
+
+def _pip_uninstall_command(
+    executable: str,
+    package_name: str,
+    *,
+    which: Callable[[str], str | None],
+) -> tuple[str, ...]:
+    if getattr(sys, "frozen", False):
+        if which("pip") is not None:
+            return _with_break_system_packages(("pip", "uninstall", "-y", package_name))
+        raise UninstallError(
+            "Cannot uninstall: frozen executable detected and pip not found on PATH."
+        )
+
+    return _with_break_system_packages(
+        (executable, "-m", "pip", "uninstall", "-y", package_name)
+    )
+
+
+def _with_break_system_packages(command: tuple[str, ...]) -> tuple[str, ...]:
+    if not _is_externally_managed_python():
+        return command
+    if command[-1] == "--break-system-packages":
+        return command
+    return (*command, "--break-system-packages")
+
+
+def _is_externally_managed_python() -> bool:
+    for prefix in {Path(sys.prefix), Path(getattr(sys, "base_prefix", sys.prefix))}:
+        if (prefix / "EXTERNALLY-MANAGED").exists():
+            return True
+    return False
+
+
+def _resolve_launcher_path(which: Callable[[str], str | None]) -> Path | None:
+    launcher = which("netorium")
+    if launcher is None:
+        return None
+    return Path(launcher).expanduser()
+
+
+def _launcher_cleanup_fragment(platform_name: str, launcher_path: Path | None) -> str:
+    if launcher_path is None:
+        return ""
+    if platform_name.startswith("win"):
+        quoted = _cmd_quote_string(str(launcher_path))
+        return f"if exist {quoted} del /f /q {quoted} >nul 2>nul"
+    return f"rm -f {shlex.quote(str(launcher_path))}"
 
 
 def _read_configured_database_path(config_path: Path) -> Path | None:

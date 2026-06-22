@@ -371,7 +371,7 @@ def _execute_uninstall(*, remove_data: bool, package_manager: str) -> None:
     except UninstallError as exc:
         _fail(exc)
 
-    _render_uninstall_result(result)
+    _render_uninstall_result(result, plan=plan)
     console.print("Exiting Netorium.")
     sys.exit(0)
 
@@ -420,9 +420,14 @@ def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
         )
 
 
-def _render_uninstall_result(result: UninstallResult) -> None:
+def _render_uninstall_result(result: UninstallResult, *, plan: UninstallPlan) -> None:
     if result.package_command_ran:
-        console.print("Package uninstall command completed.")
+        if plan.package_command_detached:
+            console.print("Package uninstall scheduled after Netorium exits.")
+            if plan.package_command is not None:
+                console.print(f"Scheduled command: {format_command(plan.package_command)}")
+        else:
+            console.print("Package uninstall command completed.")
     else:
         console.print("Package uninstall was skipped.")
 

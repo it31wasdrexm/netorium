@@ -208,6 +208,15 @@ netorium controller init
 netorium controller install-service
 ```
 
+On Linux, the default user service works without root. Use `--system` for a
+system-wide unit that survives logout. Netorium re-execs under `sudo` with
+`python -m netorium` and the correct `PYTHONPATH` for pip, pipx, and editable
+installs. The system unit runs as the installing user account.
+
+If `controller install-service --system` fails with `No module named 'netorium'`,
+reinstall Netorium with the GitHub installer or standalone binary, then run the
+service install again.
+
 On Windows, run PowerShell or Windows Terminal as Administrator before installing
 the service. Netorium uses NSSM when it is available; otherwise it registers the
 service with `sc.exe` and quotes the installed executable path, including the

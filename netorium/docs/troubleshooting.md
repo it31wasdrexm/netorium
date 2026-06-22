@@ -145,6 +145,33 @@ If a GitHub Release asset is named only `netorium`, it was uploaded from
 `dist/netorium` directly. Upload the renamed file from `release-assets/`
 instead.
 
+## Linux Controller Service Fails Under sudo
+
+If `netorium controller install-service --system` fails with:
+
+```text
+ModuleNotFoundError: No module named 'netorium'
+```
+
+the old service installer re-ran `~/.local/bin/netorium` as root. Root Python
+cannot see a user `pip` or editable install. Reinstall the current Netorium
+build, then run:
+
+```bash
+netorium controller uninstall-service
+netorium controller install-service --system
+```
+
+The current installer re-execs with `python -m netorium` and the correct
+`PYTHONPATH`, and the system unit runs as your user account.
+
+For a user service that survives logout without sudo, enable lingering:
+
+```bash
+loginctl enable-linger "$USER"
+systemctl --user status netorium-controller
+```
+
 ## Docker Firewall Limitation
 
 Docker is useful when the host PC should not have Python installed, but a

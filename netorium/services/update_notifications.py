@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from netorium.core.settings import ConfigError, load_settings
+from netorium.core.settings import ConfigError, default_config_path, load_settings
 from netorium.services.update_checker import (
+    DEFAULT_GITHUB_REPO,
+    DEFAULT_PACKAGE_NAME,
     DEFAULT_TIMEOUT_SECONDS,
     HttpClient,
     PlatformInstallInstructions,
@@ -31,16 +33,23 @@ def get_startup_update_notice(
     try:
         settings = load_settings()
     except ConfigError:
-        return None
-
-    if not settings.updates.check_on_start:
-        return None
-
-    try:
+        if default_config_path().exists():
+            return None
+        config = build_update_config(
+            source="github",
+            repo=DEFAULT_GITHUB_REPO,
+            package_name=DEFAULT_PACKAGE_NAME,
+        )
+    else:
+        if not settings.updates.check_on_start:
+            return None
         config = build_update_config(
             source=settings.updates.source,
             repo=settings.updates.repo,
+            package_name=DEFAULT_PACKAGE_NAME,
         )
+
+    try:
         info = check_for_update(
             config,
             current_version=current_version,

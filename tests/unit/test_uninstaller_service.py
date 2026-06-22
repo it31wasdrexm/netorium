@@ -88,6 +88,35 @@ def test_uninstall_plan_handles_windows_standalone_when_frozen(
     ]
 
 
+def test_uninstall_plan_handles_windows_local_venv_install(tmp_path: Path) -> None:
+    env = {
+        "APPDATA": str(tmp_path / "Roaming"),
+        "LOCALAPPDATA": str(tmp_path / "Local"),
+    }
+    executable = tmp_path / "Local" / "Netorium" / "venv" / "Scripts" / "python.exe"
+
+    plan = build_uninstall_plan(
+        executable=str(executable),
+        which=lambda _command: None,
+        env=env,
+        platform_name="win32",
+    )
+
+    assert plan.package_manager == "standalone"
+    assert plan.package_command_detached is True
+    assert plan.path_targets == ()
+    assert plan.package_command is not None
+    assert plan.package_command[:3] == ("cmd.exe", "/d", "/c")
+    assert [target.label for target in plan.deferred_path_targets] == [
+        "Windows virtual environment",
+        "Windows launcher directory",
+    ]
+    assert [target.path for target in plan.deferred_path_targets] == [
+        tmp_path / "Local" / "Netorium" / "venv",
+        tmp_path / "Local" / "Netorium" / "bin",
+    ]
+
+
 def test_uninstall_plan_rejects_unknown_package_manager() -> None:
     with pytest.raises(UninstallError, match="Package manager must be"):
         build_uninstall_plan(package_manager="brew")

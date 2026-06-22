@@ -77,6 +77,15 @@ def build_uninstall_plan(
     data_dir = user_data_dir(platform_name=active_platform, env=env)
     cache_dir = user_cache_dir(platform_name=active_platform, env=env)
     configured_database_path = _read_configured_database_path(config_path)
+    executable_path = Path(active_executable)
+
+    if (
+        selected_manager == "auto"
+        and active_platform.startswith("win")
+        and _is_relative_to(executable_path, data_dir)
+    ):
+        resolved_manager = "standalone"
+        package_command = None
 
     path_targets: tuple[UninstallPathTarget, ...] = ()
     deferred_path_targets: tuple[UninstallPathTarget, ...] = ()
@@ -101,8 +110,8 @@ def build_uninstall_plan(
     if resolved_manager == "standalone":
         if active_platform.startswith("win"):
             package_command_detached = True
-            deferred_targets = _windows_standalone_targets(
-                executable=Path(active_executable),
+            deferred_targets = _windows_install_targets(
+                executable=executable_path,
                 remove_data=remove_data,
                 config_dir=config_path.parent,
                 data_dir=data_dir,
@@ -227,7 +236,7 @@ def _build_package_command(
     return "pip", (executable, "-m", "pip", "uninstall", "-y", package_name)
 
 
-def _windows_standalone_targets(
+def _windows_install_targets(
     *,
     executable: Path,
     remove_data: bool,
@@ -245,6 +254,38 @@ def _windows_standalone_targets(
             targets.append(UninstallPathTarget("Standalone executable", executable))
         return targets
 
+    local_targets = _windows_local_install_targets(executable=executable, data_dir=data_dir)
+    if local_targets:
+        return local_targets
+
+    return [
+        UninstallPathTarget("Standalone executable", executable),
+        UninstallPathTarget("Standalone bin directory", executable.parent),
+    ]
+
+
+def _windows_local_install_targets(
+    *,
+    executable: Path,
+    data_dir: Path,
+) -> list[UninstallPathTarget]:
+    if not _is_relative_to(executable, data_dir):
+        return []
+
+    targets: list[UninstallPathTarget] = []
+    bin_dir = data_dir / "bin"
+    venv_dir = data_dir / "venv"
+
+    if _is_relative_to(executable, venv_dir):
+        targets.append(UninstallPathTarget("Windows virtual environment", venv_dir))
+        targets.append(UninstallPathTarget("Windows launcher directory", bin_dir))
+        return targets
+
+    if _is_relative_to(executable, bin_dir):
+        targets.append(UninstallPathTarget("Windows launcher directory", bin_dir))
+        targets.append(UninstallPathTarget("Windows virtual environment", venv_dir))
+        return targets
+
     return [
         UninstallPathTarget("Standalone executable", executable),
         UninstallPathTarget("Standalone bin directory", executable.parent),
@@ -260,8 +301,10 @@ def _windows_deferred_remove_command(
     commands = ["timeout /t 3 /nobreak >nul 2>nul"]
     for target in targets:
         quoted_path = _cmd_quote(target.path)
-        quoted_children = _cmd_quote_string(f"{target.path}\\*")
-        commands.append(f"if exist {quoted_children} rmdir /s /q {quoted_path} >nul 2>nul")
+        quoted_directory_probe = _cmd_quote_string(f"{target.path}\\NUL")
+        commands.append(
+            f"if exist {quoted_directory_probe} rmdir /s /q {quoted_path} >nul 2>nul"
+        )
         commands.append(f"if exist {quoted_path} del /f /q {quoted_path} >nul 2>nul")
     return ("cmd.exe", "/d", "/c", " & ".join(commands))
 

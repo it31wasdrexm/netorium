@@ -28,7 +28,10 @@ class FakeClient:
         return FakeResponse()
 
 
-def test_startup_notice_skips_missing_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_startup_notice_uses_default_repo_without_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     for key, value in isolated_user_env(tmp_path).items():
         monkeypatch.setenv(key, value)
     client = FakeClient()
@@ -39,8 +42,10 @@ def test_startup_notice_skips_missing_config(monkeypatch: pytest.MonkeyPatch, tm
         system_name="Linux",
     )
 
-    assert notice is None
-    assert client.urls == []
+    assert notice is not None
+    assert notice.info.latest_version == "0.2.0"
+    assert notice.platform.platform_name == "Linux"
+    assert client.urls == ["https://api.github.com/repos/it31wasdrexm/netorium/releases/latest"]
 
 
 def test_startup_notice_skips_when_disabled(

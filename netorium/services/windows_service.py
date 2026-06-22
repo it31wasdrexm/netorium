@@ -42,3 +42,25 @@ def build_sc_create_command(
         "DisplayName=",
         display_name,
     ]
+
+
+def build_sc_config_command(
+    service_name: str,
+    executable: str,
+    args: Sequence[str],
+    *,
+    display_name: str,
+) -> list[str]:
+    """Build argument list for ``sc.exe config``."""
+    binpath = format_sc_binpath(executable, args)
+    return [
+        "sc.exe",
+        "config",
+        service_name,
+        "binPath=",
+        binpath,
+        "start=",
+        "auto",
+        "DisplayName=",
+        display_name,
+    ]

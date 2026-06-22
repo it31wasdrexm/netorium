@@ -21,7 +21,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from netorium.services.windows_service import build_sc_create_command
+from netorium.services.windows_service import build_sc_config_command, build_sc_create_command
 
 
 class ControllerServiceError(RuntimeError):
@@ -383,6 +383,7 @@ def _install_windows_service(host: str, port: int) -> str:
 
 def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> str:
     svc = _WINDOWS_SERVICE_NAME
+    _remove_windows_service(svc, nssm=nssm)
     _run([nssm, "install", svc, executable,
           "controller", "start", "--host", host, "--port", str(port)])
     _run([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
@@ -400,15 +401,28 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
 
 def _install_windows_sc(executable: str, host: str, port: int) -> str:
     svc = _WINDOWS_SERVICE_NAME
-    _run(
-        build_sc_create_command(
-            svc,
-            executable,
-            ["controller", "start", "--host", host, "--port", str(port)],
-            display_name="Netorium Controller",
+    controller_args = ["controller", "start", "--host", host, "--port", str(port)]
+    display_name = "Netorium Controller"
+    if _windows_service_exists(svc):
+        _run_optional(["sc.exe", "stop", svc])
+        _run(
+            build_sc_config_command(
+                svc,
+                executable,
+                controller_args,
+                display_name=display_name,
+            )
         )
-    )
-    _run(["sc", "start", svc])
+    else:
+        _run(
+            build_sc_create_command(
+                svc,
+                executable,
+                controller_args,
+                display_name=display_name,
+            )
+        )
+    _run(["sc.exe", "start", svc])
     return (
         f"Windows service '{svc}' installed and started with sc.exe.\n"
         f"  Status:  sc query {svc}\n"
@@ -419,15 +433,36 @@ def _install_windows_sc(executable: str, host: str, port: int) -> str:
     )
 
 
+def _remove_windows_service(svc: str, *, nssm: str | None = None) -> None:
+    if nssm:
+        _run_optional([nssm, "stop", svc])
+        _run_optional([nssm, "remove", svc, "confirm"])
+        return
+
+    _run_optional(["sc.exe", "stop", svc])
+    _run_optional(["sc.exe", "delete", svc])
+
+
+def _windows_service_exists(svc: str) -> bool:
+    try:
+        completed = subprocess.run(
+            ["sc.exe", "query", svc],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return False
+    return completed.returncode == 0
+
+
 def _uninstall_windows_service() -> str:
     svc = _WINDOWS_SERVICE_NAME
     nssm = shutil.which("nssm")
     if nssm:
-        _run_optional([nssm, "stop", svc])
-        _run_optional([nssm, "remove", svc, "confirm"])
+        _remove_windows_service(svc, nssm=nssm)
     else:
-        _run_optional(["sc", "stop", svc])
-        _run_optional(["sc", "delete", svc])
+        _remove_windows_service(svc)
     return f"Windows service '{svc}' stopped and removed."
 
 

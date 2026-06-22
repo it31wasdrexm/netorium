@@ -178,13 +178,19 @@ def _render_interactive_header() -> None:
     console.print(
         Panel.fit(
             f"[bold]{APP_NAME} {get_version()}[/]\n"
-            "Interactive command center for the local controller and endpoint policies.\n"
-            "[dim]Try: help, controller status, controller install-service, "
-            "uninstall, exit[/]",
-            title="netorium",
+            "Interactive command center for the local controller and endpoint policies.",
+            title="Netorium Command Center",
             border_style="cyan",
         )
     )
+    shortcuts = Table(title="Common Commands", box=box.SIMPLE, show_header=True)
+    shortcuts.add_column("Task", style="cyan")
+    shortcuts.add_column("Command")
+    shortcuts.add_row("Controller", "controller status | controller install-service")
+    shortcuts.add_row("Updates", "update check | update install")
+    shortcuts.add_row("Cleanup", "uninstall | uninstall --remove-data")
+    shortcuts.add_row("Help", "help | help controller | exit")
+    console.print(shortcuts)
 
 
 def _render_startup_update_notice() -> None:

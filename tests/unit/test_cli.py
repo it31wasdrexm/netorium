@@ -73,6 +73,9 @@ def test_interactive_shell_runs_commands_without_prefix(monkeypatch: pytest.Monk
 
     assert result.exit_code == 0
     assert "Interactive command center" in result.output
+    assert "Common Commands" in result.output
+    assert "controller install-service" in result.output
+    assert "update check" in result.output
     assert "netorium>" in result.output
     assert f"{APP_NAME} {get_version()}" in result.output
     assert "Leaving Netorium." in result.output

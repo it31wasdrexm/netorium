@@ -184,26 +184,35 @@ def reexec_windows_admin_if_needed(args: list[str]) -> None:
 
 
 def uninstall_services_silently() -> None:
-    """Silently stop and delete all netorium services (controller and agent)."""
+    """Silently stop and delete all netorium services (controller and agent).
+
+    Called during ``netorium uninstall``.  Every operation is best-effort:
+    failures are silently ignored so the uninstall flow is never interrupted.
+    """
     if "PYTEST_CURRENT_TEST" in os.environ:
         return
     try:
         if sys.platform.startswith("win"):
-            if not _is_windows_admin():
-                # Cannot silently elevate without prompt, skip or it will fail
-                pass
-            _run_optional(["sc", "stop", "NetoriumController"])
-            _run_optional(["sc", "delete", "NetoriumController"])
-            _run_optional(["sc", "stop", "NetoriumAgent"])
-            _run_optional(["sc", "delete", "NetoriumAgent"])
-            _run_optional(build_schtasks_delete_command("NetoriumController"))
-            _run_optional(build_schtasks_delete_command("NetoriumAgent"))
+            nssm = resolve_nssm_executable()
+            for svc in ("NetoriumController", "NetoriumAgent"):
+                if nssm:
+                    # NSSM provides a cleaner removal than sc.exe for NSSM-managed services
+                    _run_optional([nssm, "stop", svc])
+                    _run_optional([nssm, "remove", svc, "confirm"])
+                # Also attempt sc.exe removal (no-op if service doesn't exist)
+                _run_optional(["sc.exe", "stop", svc])
+                _run_optional(["sc.exe", "delete", svc])
+            for task in ("NetoriumController", "NetoriumAgent"):
+                _run_optional(build_schtasks_delete_command(task))
+            # Remove controller firewall rules left behind by install-service
+            _run_optional(build_firewall_delete_command())
+            _run_optional(build_firewall_delete_program_command())
         elif sys.platform.startswith("linux"):
             _run_optional(["sudo", "systemctl", "stop", "netorium-controller"])
             _run_optional(["sudo", "systemctl", "disable", "netorium-controller"])
             _run_optional(["systemctl", "--user", "stop", "netorium-controller"])
             _run_optional(["systemctl", "--user", "disable", "netorium-controller"])
-            
+
             _run_optional(["sudo", "systemctl", "stop", "netorium-agent"])
             _run_optional(["sudo", "systemctl", "disable", "netorium-agent"])
             _run_optional(["systemctl", "--user", "stop", "netorium-agent"])
@@ -563,10 +572,15 @@ def _uninstall_windows_service() -> str:
     task = _WINDOWS_TASK_NAME
     nssm = resolve_nssm_executable()
     if nssm:
-        _remove_windows_service(svc, nssm=nssm)
-    else:
-        _remove_windows_task(task)
-    _remove_windows_service(svc)
+        # Try NSSM removal first (clean for NSSM-managed services)
+        _run_optional([nssm, "stop", svc])
+        _run_optional([nssm, "remove", svc, "confirm"])
+    # Also attempt sc.exe removal (no-op if already gone or was never an sc service)
+    _run_optional(build_sc_stop_command(svc))
+    _run_optional(build_sc_delete_command(svc))
+    # Remove the Task Scheduler fallback entry too
+    _remove_windows_task(task)
+    # Remove firewall rules added by install-service
     _run_optional(build_firewall_delete_command())
     _run_optional(build_firewall_delete_program_command())
     return f"Windows controller background task/service '{task}' stopped and removed."

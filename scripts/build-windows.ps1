@@ -193,6 +193,7 @@ function Install-UserCommand {
     $ResolvedBinDir = (New-Item -ItemType Directory -Force -Path $BinDir).FullName
     $InstalledPath = Join-Path $ResolvedBinDir "netorium.exe"
     Copy-Item $SourcePath $InstalledPath -Force
+    Install-BundledNssm -TargetDir $ResolvedBinDir
     Add-UserPathEntry -PathEntry $ResolvedBinDir
 
     Write-Host "Installed command: $InstalledPath"
@@ -200,6 +201,51 @@ function Install-UserCommand {
     Invoke-NativeCommand -Command "netorium" -Arguments @("version")
     Write-Host "Run: netorium --help"
     Write-Host "If this terminal still cannot find netorium, open a new PowerShell window."
+}
+
+function Install-BundledNssm {
+    param(
+        [string] $TargetDir
+    )
+
+    $NssmSource = Join-Path $AssetDir "nssm.exe"
+    if (-not (Test-Path $NssmSource)) {
+        return
+    }
+
+    $NssmTarget = Join-Path $TargetDir "nssm.exe"
+    Copy-Item $NssmSource $NssmTarget -Force
+    Write-Host "Bundled NSSM service helper: $NssmTarget"
+}
+
+function Ensure-NssmReleaseAsset {
+    $NssmAssetPath = Join-Path $AssetDir "nssm.exe"
+    if (Test-Path $NssmAssetPath) {
+        return $NssmAssetPath
+    }
+
+    $NssmArchivePath = Join-Path $BuildTempDir "nssm.zip"
+    $NssmExtractDir = Join-Path $BuildTempDir "nssm"
+    $NssmDownloadUrl = "https://nssm.cc/release/nssm-2.24.zip"
+
+    Write-Host "Downloading NSSM for Windows service installs: $NssmDownloadUrl"
+    Invoke-WebRequest -Uri $NssmDownloadUrl -OutFile $NssmArchivePath
+    if (Test-Path $NssmExtractDir) {
+        Remove-Item $NssmExtractDir -Recurse -Force
+    }
+    Expand-Archive -Path $NssmArchivePath -DestinationPath $NssmExtractDir -Force
+
+    $NssmSource = Get-ChildItem -Path $NssmExtractDir -Recurse -Filter "nssm.exe" |
+        Where-Object { $_.FullName -match "win64" } |
+        Select-Object -First 1
+    if (-not $NssmSource) {
+        throw "Could not find win64/nssm.exe in the downloaded NSSM archive."
+    }
+
+    New-Item -ItemType Directory -Force -Path $AssetDir | Out-Null
+    Copy-Item $NssmSource.FullName $NssmAssetPath -Force
+    Write-Host "Prepared NSSM asset: $NssmAssetPath"
+    return $NssmAssetPath
 }
 
 $Python = Get-PythonCommand
@@ -228,6 +274,7 @@ $AssetName = "netorium-windows-$(Get-AssetArch).exe"
 $TargetPath = Join-Path $AssetDir $AssetName
 Copy-Item $SourcePath $TargetPath -Force
 Write-Host "Built: $TargetPath"
+Ensure-NssmReleaseAsset | Out-Null
 $ResolvedTargetPath = (Resolve-Path $TargetPath).Path
 if (-not $SkipVerify) {
     Write-Host "Verifying standalone build:"

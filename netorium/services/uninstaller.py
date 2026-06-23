@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Protocol, cast
@@ -124,6 +126,7 @@ def build_uninstall_plan(
             package_command = _windows_deferred_remove_command(
                 deferred_path_targets,
                 bin_dir=bin_dir,
+                executable=executable_path,
             )
         else:
             path_targets = _dedupe_targets(
@@ -313,31 +316,71 @@ def _windows_deferred_remove_command(
     targets: tuple[UninstallPathTarget, ...],
     *,
     bin_dir: Path | None = None,
+    executable: Path | None = None,
 ) -> tuple[str, ...] | None:
-    if not targets and bin_dir is None:
+    cleanup_lines = _windows_cleanup_script_lines(
+        targets,
+        bin_dir=bin_dir,
+        executable=executable,
+    )
+    if not cleanup_lines:
         return None
 
+    return ("cmd.exe", "/d", "/c", " & ".join(cleanup_lines))
+
+
+def _windows_cleanup_script_lines(
+    targets: tuple[UninstallPathTarget, ...],
+    *,
+    bin_dir: Path | None = None,
+    executable: Path | None = None,
+) -> list[str]:
     commands = [
         "taskkill /IM netorium.exe /F >nul 2>nul",
-        "timeout /t 5 /nobreak >nul 2>nul",
+        "taskkill /IM netorium-agent.exe /F >nul 2>nul",
+        "timeout /t 2 /nobreak >nul 2>nul",
     ]
-    for target in targets:
-        quoted_path = _cmd_quote(target.path)
-        quoted_directory_probe = _cmd_quote_string(f"{target.path}\\NUL")
-        commands.append(
-            f"if exist {quoted_directory_probe} rmdir /s /q {quoted_path} >nul 2>nul"
-        )
-        commands.append(f"if exist {quoted_path} del /f /q {quoted_path} >nul 2>nul")
+
+    removal_paths: list[Path] = []
+    if executable is not None:
+        removal_paths.append(executable)
+    if bin_dir is not None:
+        removal_paths.append(bin_dir / "netorium.exe")
+        removal_paths.append(bin_dir)
+    removal_paths.extend(target.path for target in targets)
+    for path in _sort_windows_removal_paths(removal_paths):
+        commands.extend(_windows_remove_path_commands(path))
 
     if bin_dir is not None:
-        quoted_bin_dir = _cmd_quote(bin_dir)
-        quoted_bin_probe = _cmd_quote_string(f"{bin_dir}\\NUL")
-        commands.append(
-            f"if exist {quoted_bin_probe} rmdir /s /q {quoted_bin_dir} >nul 2>nul"
-        )
         commands.extend(_windows_remove_path_entry_commands(bin_dir))
 
-    return ("cmd.exe", "/d", "/c", " & ".join(commands))
+    return commands
+
+
+def _sort_windows_removal_paths(paths: list[Path]) -> list[Path]:
+    seen: set[Path] = set()
+    unique_paths: list[Path] = []
+    for path in paths:
+        normalized = path.expanduser()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_paths.append(normalized)
+
+    return sorted(
+        unique_paths,
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+
+
+def _windows_remove_path_commands(path: Path) -> list[str]:
+    quoted_path = _cmd_quote(path)
+    quoted_dir_probe = _cmd_quote_string(f"{path}\\")
+    return [
+        f"if exist {quoted_dir_probe} rmdir /s /q {quoted_path} >nul 2>nul",
+        f"if exist {quoted_path} del /f /q {quoted_path} >nul 2>nul",
+    ]
 
 
 def _windows_remove_path_entry_commands(path_entry: Path) -> list[str]:
@@ -498,23 +541,70 @@ def _run_command(args: tuple[str, ...]) -> int:
 
 
 def _run_command_detached(args: tuple[str, ...]) -> int:
+    if sys.platform.startswith("win"):
+        return _run_windows_cleanup_detached(args)
+
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "close_fds": True,
     }
-    if sys.platform.startswith("win"):
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-        kwargs["creationflags"] = creationflags
 
     try:
         subprocess.Popen(args, **kwargs)
     except FileNotFoundError as exc:
         raise UninstallError(
             f"Command not found while scheduling uninstall cleanup: {args[0]}"
+        ) from exc
+    return 0
+
+
+def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
+    if len(args) >= 4 and args[0] == "cmd.exe" and args[1] == "/d" and args[2] == "/c":
+        cleanup_body = args[3]
+        parent_pid = os.getpid()
+        script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.cmd"
+        script_lines = [
+            "@echo off",
+            "setlocal",
+            ":wait_parent",
+            (
+                f'tasklist /FI "PID eq {parent_pid}" 2>nul | find /I "{parent_pid}" >nul '
+                "&& (timeout /t 1 /nobreak >nul 2>nul & goto wait_parent)"
+            ),
+            cleanup_body,
+            'del /f /q "%~f0" >nul 2>nul',
+        ]
+        script_path.write_text("\r\n".join(script_lines), encoding="utf-8")
+        launch_args = (
+            "cmd.exe",
+            "/c",
+            "start",
+            "",
+            "/MIN",
+            "cmd.exe",
+            "/d",
+            "/c",
+            _cmd_quote_string(str(script_path)),
+        )
+    else:
+        launch_args = args
+
+    kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0),
+    }
+
+    try:
+        subprocess.Popen(launch_args, **kwargs)
+    except FileNotFoundError as exc:
+        raise UninstallError(
+            f"Command not found while scheduling uninstall cleanup: {launch_args[0]}"
         ) from exc
     return 0
 

@@ -9,7 +9,15 @@ from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from typer.main import get_command
+
+from netorium.cli.branding import (
+    MUTED_STYLE,
+    render_info_panel,
+    render_logo_panel,
+    render_notice_panel,
+)
 
 from netorium.cli.agent import app as endpoint_agent_app
 from netorium.cli.commands.ad import ad_app
@@ -177,31 +185,43 @@ def _run_interactive_sudo(args: list[str]) -> None:
 
 
 def _render_interactive_header() -> None:
-    overview = Table.grid(padding=(0, 2))
-    overview.add_column(style="cyan")
-    overview.add_column()
-    overview.add_row("Version", get_version())
-    overview.add_row("Platform", platform.system() or "unknown")
-    overview.add_row("Config", str(default_config_path()))
-
-    console.print(
-        Panel(
-            overview,
-            title="Netorium Command Center",
-            subtitle="local controller and endpoint policies",
-            border_style="cyan",
-            expand=False,
-        )
+    console.print()
+    console.print(render_logo_panel(subtitle="local controller and endpoint policies"))
+    overview = render_info_panel(
+        "Environment",
+        (
+            ("Version", get_version()),
+            ("Platform", platform.system() or "unknown"),
+            ("Config", str(default_config_path())),
+        ),
+        expand=False,
     )
-    shortcuts = Table(title="Common Commands", box=box.SIMPLE_HEAVY, show_header=True)
-    shortcuts.add_column("Task", style="cyan")
-    shortcuts.add_column("Command")
-    shortcuts.add_column("Use")
-    shortcuts.add_row("Controller", "controller status | controller install-service", "run in background")
+    console.print(overview)
+
+    shortcuts = Table(
+        title="Quick Commands",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold bright_cyan",
+        border_style="bright_black",
+    )
+    shortcuts.add_column("Task", style="cyan", no_wrap=True)
+    shortcuts.add_column("Command", style="white")
+    shortcuts.add_column("Use", style=MUTED_STYLE)
+    shortcuts.add_row(
+        "Controller",
+        "controller status | controller install-service",
+        "run in background",
+    )
     shortcuts.add_row("Updates", "update check | update install", "check or install latest")
-    shortcuts.add_row("Cleanup", "uninstall | uninstall --remove-data", "remove CLI cleanly")
+    shortcuts.add_row(
+        "Cleanup",
+        "uninstall | uninstall --remove-data",
+        "remove CLI cleanly",
+    )
     shortcuts.add_row("Help", "help | help controller | exit", "navigate commands")
     console.print(shortcuts)
+    console.print()
 
 
 def _render_startup_update_notice() -> None:
@@ -213,24 +233,19 @@ def _render_startup_update_notice() -> None:
 
 
 def _startup_update_panel(notice: StartupUpdateNotice) -> Panel:
-    platform = notice.platform
+    platform_info = notice.platform
     body = Table.grid(padding=(0, 2))
-    body.add_column(style="yellow")
+    body.add_column(style="yellow", justify="right")
     body.add_column()
     body.add_row(
         "Update",
-        f"{notice.info.current_version} -> [bold]{notice.info.latest_version}[/]",
+        f"{notice.info.current_version} -> [bold bright_yellow]{notice.info.latest_version}[/]",
     )
-    body.add_row("Platform", platform.platform_name)
-    body.add_row("Install", f"[bold]{platform.install_command}[/]")
-    body.add_row("Standalone", platform.standalone_command)
+    body.add_row("Platform", platform_info.platform_name)
+    body.add_row("Install", f"[bold]{platform_info.install_command}[/]")
+    body.add_row("Standalone", platform_info.standalone_command)
     body.add_row("Release", notice.info.release_url)
-    return Panel(
-        body,
-        title="Netorium Update Available",
-        border_style="yellow",
-        expand=False,
-    )
+    return render_notice_panel("Update Available", body, border_style="yellow")
 
 
 @app.callback(invoke_without_command=True)
@@ -317,11 +332,14 @@ def uninstall(
         return
 
     if not yes:
+        console.print()
         console.print(
-            Panel.fit(
-                "This will remove the installed Netorium command.\n"
-                "You can keep or remove local config, database, and cache in the next step.",
-                title="Netorium Uninstall",
+            render_notice_panel(
+                "Uninstall",
+                Text.from_markup(
+                    "This will remove the installed Netorium command.\n"
+                    "You can keep or remove local config, database, and cache in the next step."
+                ),
                 border_style="yellow",
             )
         )
@@ -377,7 +395,13 @@ def _execute_uninstall(*, remove_data: bool, package_manager: str) -> None:
 
 
 def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
-    table = Table(title="Netorium Uninstall", box=box.SIMPLE_HEAVY)
+    table = Table(
+        title="Uninstall Plan",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold bright_cyan",
+        border_style="bright_black",
+    )
     table.add_column("Field")
     table.add_column("Value")
     table.add_row("Mode", "preview" if dry_run else "confirmed")

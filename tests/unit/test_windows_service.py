@@ -5,6 +5,9 @@ import pytest
 import netorium.services.controller_service as controller_service
 from netorium.services.windows_background import (
     build_firewall_add_command,
+    build_firewall_add_program_command,
+    build_firewall_delete_command,
+    build_firewall_delete_program_command,
     build_schtasks_create_command,
     build_schtasks_run_command,
 )
@@ -95,12 +98,14 @@ def test_build_schtasks_create_command_includes_quiet_controller_start() -> None
 
     assert command[:4] == ["schtasks", "/Create", "/TN", "NetoriumController"]
     assert "--quiet" in command[5]
-    assert command[-3:] == ["/RL", "HIGHEST", "/F"]
+    assert command[-4:] == ["/RL", "HIGHEST", "/IT", "/F"]
 
 
 def test_build_firewall_add_command_uses_controller_port() -> None:
     command = build_firewall_add_command(8765)
-    assert command[-1] == "localport=8765"
+    assert "localport=8765" in command
+    assert "profile=any" in command
+    assert "enable=yes" in command
     assert 'name="Netorium Controller"' in command
 
 
@@ -118,6 +123,7 @@ def test_windows_sc_install_creates_starts_and_opens_firewall(monkeypatch) -> No
     result = controller_service._install_windows_sc(
         executable=r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe",
         args=["controller", "start", "--host", "0.0.0.0", "--port", "8765", "--quiet"],
+        host="0.0.0.0",
         port=8765,
         service_name="NetoriumController",
         display_name="Netorium Controller",
@@ -125,8 +131,13 @@ def test_windows_sc_install_creates_starts_and_opens_firewall(monkeypatch) -> No
 
     assert commands[0][:3] == ["sc.exe", "create", "NetoriumController"]
     assert commands[1] == build_sc_stop_command("NetoriumController")
-    assert commands[2] == build_firewall_add_command(8765)
-    assert commands[3] == build_sc_start_command("NetoriumController")
+    assert commands[2] == build_firewall_delete_command()
+    assert commands[3] == build_firewall_delete_program_command()
+    assert commands[4] == build_firewall_add_command(8765)
+    assert commands[5] == build_firewall_add_program_command(
+        r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe"
+    )
+    assert commands[6] == build_sc_start_command("NetoriumController")
     assert "sc.exe" in result
 
 
@@ -147,6 +158,7 @@ def test_windows_sc_install_updates_existing_service(monkeypatch) -> None:
     controller_service._install_windows_sc(
         executable=r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe",
         args=["controller", "start", "--host", "0.0.0.0", "--port", "8765", "--quiet"],
+        host="0.0.0.0",
         port=8765,
         service_name="NetoriumController",
         display_name="Netorium Controller",
@@ -192,6 +204,11 @@ def test_windows_task_install_creates_runs_and_opens_firewall(monkeypatch) -> No
 
     assert commands[0] == ["delete-task"]
     assert commands[1][:3] == ["schtasks", "/Create", "/TN"]
-    assert commands[2] == build_firewall_add_command(8765)
-    assert commands[3] == build_schtasks_run_command("NetoriumController")
+    assert commands[2] == build_firewall_delete_command()
+    assert commands[3] == build_firewall_delete_program_command()
+    assert commands[4] == build_firewall_add_command(8765)
+    assert commands[5] == build_firewall_add_program_command(
+        r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe"
+    )
+    assert commands[6] == build_schtasks_run_command("NetoriumController")
     assert "scheduled task" in result

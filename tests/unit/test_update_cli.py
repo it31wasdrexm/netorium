@@ -64,7 +64,7 @@ def test_update_install_prints_manual_commands(monkeypatch: pytest.MonkeyPatch) 
     result = runner.invoke(app, ["update", "install"])
 
     assert result.exit_code == 0
-    assert "Netorium Update Install" in result.output
+    assert "Update Install" in result.output
     assert "curl -fsSL" in result.output
     assert "raw.githubusercontent.com/it31wasdrexm/netorium/main/get.sh" in result.output
     assert "pipx upgrade netorium-cli" in result.output

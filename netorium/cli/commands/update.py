@@ -1,7 +1,9 @@
 import typer
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
+
+from netorium.cli.branding import render_notice_panel
 
 from netorium.core.metadata import get_version
 from netorium.core.settings import ConfigError, load_settings
@@ -38,24 +40,20 @@ def check() -> None:
 
     if info.is_update_available:
         platform_instructions = build_platform_install_instructions(_download_instructions())
-        console.print(
-            Panel.fit(
-                f"[bold yellow]Update available:[/] {info.latest_version}\n"
-                f"Current version: {info.current_version}\n"
-                f"Platform: {platform_instructions.platform_name}\n"
-                f"Run: [bold]{platform_instructions.install_command}[/]\n"
-                f"Standalone: {platform_instructions.standalone_command}\n"
-                + (
-                    f"Standalone asset: {platform_instructions.standalone_asset}\n"
-                    if platform_instructions.standalone_asset is not None
-                    else ""
-                )
-                +
-                f"Release: {info.release_url}",
-                title="Netorium Update",
-                border_style="yellow",
+        body = Text.from_markup(
+            f"[bold bright_yellow]Update available:[/] {info.latest_version}\n"
+            f"Current version: {info.current_version}\n"
+            f"Platform: {platform_instructions.platform_name}\n"
+            f"Run: [bold]{platform_instructions.install_command}[/]\n"
+            f"Standalone: {platform_instructions.standalone_command}\n"
+            + (
+                f"Standalone asset: {platform_instructions.standalone_asset}\n"
+                if platform_instructions.standalone_asset is not None
+                else ""
             )
+            + f"Release: {info.release_url}"
         )
+        console.print(render_notice_panel("Netorium Update", body, border_style="yellow"))
         console.print(f"Package manager: {info.install_command}")
         return
 
@@ -117,9 +115,9 @@ def install() -> None:
         body_lines.insert(0, "Reinstall the latest Netorium CLI with the command below.")
 
     console.print(
-        Panel.fit(
-            "\n".join(body_lines),
-            title="Netorium Update Install",
+        render_notice_panel(
+            "Update Install",
+            Text.from_markup("\n".join(body_lines)),
             border_style="cyan",
         )
     )

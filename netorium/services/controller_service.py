@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import ctypes
 import os
+import socket
+import time
+import urllib.error
+import urllib.request
 import shutil
 import subprocess
 import sys
@@ -33,11 +37,14 @@ from netorium.services.linux_service_runtime import (
 )
 from netorium.services.windows_background import (
     build_firewall_add_command,
+    build_firewall_add_program_command,
     build_firewall_delete_command,
+    build_firewall_delete_program_command,
     build_schtasks_create_command,
     build_schtasks_delete_command,
     build_schtasks_run_command,
 )
+from netorium.services.windows_nssm import resolve_nssm_executable
 from netorium.services.windows_service import (
     build_sc_config_command,
     build_sc_create_command,
@@ -413,21 +420,33 @@ def _install_windows_service(host: str, port: int) -> str:
     executable = _find_executable("netorium")
     controller_args = ["controller", "start", "--host", host, "--port", str(port), "--quiet"]
 
-    # Prefer NSSM if available – it handles stdout/stderr better.
-    nssm = shutil.which("nssm")
+    nssm = resolve_nssm_executable()
     if nssm:
-        return _install_windows_nssm(nssm, executable, host, port)
+        return _append_windows_service_health_note(
+            _install_windows_nssm(nssm, executable, host, port),
+            host=host,
+            port=port,
+        )
 
     try:
-        return _install_windows_sc(
-            executable=executable,
-            args=controller_args,
+        return _append_windows_service_health_note(
+            _install_windows_sc(
+                executable=executable,
+                args=controller_args,
+                host=host,
+                port=port,
+                service_name=_WINDOWS_SERVICE_NAME,
+                display_name="Netorium Controller",
+            ),
+            host=host,
             port=port,
-            service_name=_WINDOWS_SERVICE_NAME,
-            display_name="Netorium Controller",
         )
     except ControllerServiceError:
-        return _install_windows_task(executable, host, port)
+        return _append_windows_service_health_note(
+            _install_windows_task(executable, host, port),
+            host=host,
+            port=port,
+        )
 
 
 def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> str:
@@ -437,14 +456,16 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
     _run([nssm, "install", svc, executable,
           "controller", "start", "--host", host, "--port", str(port), "--quiet"])
     _run([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
+    _run([nssm, "set", svc, "AppDirectory", str(Path(executable).parent)])
     _run([nssm, "set", svc, "AppStdout", r"C:\ProgramData\Netorium\controller.log"])
     _run([nssm, "set", svc, "AppStderr", r"C:\ProgramData\Netorium\controller.err"])
-    _run_optional(build_firewall_add_command(port))
+    _configure_windows_firewall(executable=executable, port=port)
     _run([nssm, "start", svc])
     return (
-        f"Windows service '{svc}' installed and started with NSSM.\n"
+        f"Windows service '{svc}' installed and started with bundled NSSM.\n"
+        f"  Listen:  http://{host}:{port}\n"
         f"  Status:  sc query {svc}\n"
-        f"  Firewall: inbound TCP port {port} allowed.\n"
+        f"  Firewall: inbound TCP port {port} allowed on all profiles.\n"
         f"  Logs:    C:\\ProgramData\\Netorium\\controller.log\n"
         f"  Stop:    sc stop {svc}\n"
         f"  Remove:  netorium controller uninstall-service"
@@ -455,6 +476,7 @@ def _install_windows_sc(
     *,
     executable: str,
     args: list[str],
+    host: str,
     port: int,
     service_name: str,
     display_name: str,
@@ -480,17 +502,15 @@ def _install_windows_sc(
         _run(config_cmd)
 
     _run_optional(build_sc_stop_command(service_name))
-    _run_optional(build_firewall_add_command(port))
+    _configure_windows_firewall(executable=executable, port=port)
     _run(build_sc_start_command(service_name))
     return (
         f"Windows service '{service_name}' installed and started with sc.exe.\n"
+        f"  Listen:  http://{host}:{port}\n"
         f"  Status:  sc query {service_name}\n"
-        f"  Firewall: inbound TCP port {port} allowed.\n"
+        f"  Firewall: inbound TCP port {port} allowed on all profiles.\n"
         f"  Stop:    sc stop {service_name}\n"
-        f"  Remove:  netorium controller uninstall-service\n"
-        "\n"
-        "  Tip: Install NSSM (https://nssm.cc) for service logs under "
-        r"C:\ProgramData\Netorium\."
+        f"  Remove:  netorium controller uninstall-service"
     )
 
 
@@ -505,17 +525,16 @@ def _install_windows_task(executable: str, host: str, port: int) -> str:
             controller_args,
         )
     )
-    _run_optional(build_firewall_add_command(port))
+    _configure_windows_firewall(executable=executable, port=port)
     _run(build_schtasks_run_command(task))
     return (
         f"Windows scheduled task '{task}' installed and started.\n"
+        f"  Listen:  http://{host}:{port}\n"
         f"  Runs at logon and starts the controller in the background.\n"
-        f"  Firewall: inbound TCP port {port} allowed.\n"
+        f"  Firewall: inbound TCP port {port} allowed on all profiles.\n"
         f"  Status:  schtasks /Query /TN {task}\n"
         f"  Stop:    taskkill /IM netorium.exe /F\n"
-        f"  Remove:  netorium controller uninstall-service\n"
-        "\n"
-        "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
+        f"  Remove:  netorium controller uninstall-service"
     )
 
 
@@ -536,13 +555,14 @@ def _remove_windows_service(svc: str, *, nssm: str | None = None) -> None:
 def _uninstall_windows_service() -> str:
     svc = _WINDOWS_SERVICE_NAME
     task = _WINDOWS_TASK_NAME
-    nssm = shutil.which("nssm")
+    nssm = resolve_nssm_executable()
     if nssm:
         _remove_windows_service(svc, nssm=nssm)
     else:
         _remove_windows_task(task)
     _remove_windows_service(svc)
     _run_optional(build_firewall_delete_command())
+    _run_optional(build_firewall_delete_program_command())
     return f"Windows controller background task/service '{task}' stopped and removed."
 
 
@@ -568,6 +588,68 @@ def _ensure_windows_programdata_dir() -> None:
     if not programdata:
         return
     Path(programdata, "Netorium").mkdir(parents=True, exist_ok=True)
+
+
+def _configure_windows_firewall(*, executable: str, port: int) -> None:
+    _run_optional(build_firewall_delete_command())
+    _run_optional(build_firewall_delete_program_command())
+    _run(build_firewall_add_command(port))
+    _run(build_firewall_add_program_command(executable))
+
+
+def _append_windows_service_health_note(message: str, *, host: str, port: int) -> str:
+    health_note = _wait_for_controller_health(port)
+    lan_note = _format_windows_lan_health_hint(host=host, port=port)
+    parts = [message.rstrip()]
+    if health_note is not None:
+        parts.append(health_note)
+    if lan_note is not None:
+        parts.append(lan_note)
+    return "\n".join(parts) + "\n"
+
+
+def _wait_for_controller_health(port: int, *, timeout: float | None = None) -> str | None:
+    active_timeout = timeout
+    if active_timeout is None:
+        active_timeout = 0.25 if "PYTEST_CURRENT_TEST" in os.environ else 15.0
+    deadline = time.monotonic() + active_timeout
+    url = f"http://127.0.0.1:{port}/health"
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if response.status == 200:
+                    return f"  Health:  {url} OK"
+        except (urllib.error.URLError, TimeoutError, OSError):
+            time.sleep(1)
+    return (
+        f"  Warning: controller is not responding on {url} yet.\n"
+        "  Check logs, Windows Firewall, and run: netorium controller status"
+    )
+
+
+def _format_windows_lan_health_hint(*, host: str, port: int) -> str | None:
+    if host not in {"0.0.0.0", "::"}:
+        return None
+
+    lan_host = _detect_windows_lan_host()
+    if lan_host is None:
+        return None
+
+    return (
+        f"  LAN test: curl http://{lan_host}:{port}/health\n"
+        f"  Enrollment from other PCs: http://{lan_host}:{port}/enroll"
+    )
+
+
+def _detect_windows_lan_host() -> str | None:
+    try:
+        for result in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = str(result[4][0])
+            if not address.startswith("127.") and address != "0.0.0.0":
+                return address
+    except OSError:
+        return None
+    return None
 
 
 def _find_executable(name: str) -> str:

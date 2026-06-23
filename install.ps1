@@ -329,6 +329,40 @@ function Invoke-NetoriumDownload {
     Write-NetoriumOk $Label
 }
 
+function Install-BundledNssmIfMissing {
+    param(
+        [string] $TargetDir
+    )
+
+    $NssmTarget = Join-Path $TargetDir "nssm.exe"
+    if (Test-Path $NssmTarget) {
+        return
+    }
+
+    $TempRoot = Join-Path $env:TEMP "netorium-nssm"
+    $ArchivePath = Join-Path $TempRoot "nssm.zip"
+    $ExtractDir = Join-Path $TempRoot "extract"
+    $DownloadUrl = "https://nssm.cc/release/nssm-2.24.zip"
+
+    try {
+        New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
+        Invoke-NetoriumDownload -Url $DownloadUrl -Destination $ArchivePath -Label "Downloading NSSM service helper"
+        if (Test-Path $ExtractDir) {
+            Remove-Item $ExtractDir -Recurse -Force
+        }
+        Expand-Archive -Path $ArchivePath -DestinationPath $ExtractDir -Force
+        $NssmSource = Get-ChildItem -Path $ExtractDir -Recurse -Filter "nssm.exe" |
+            Where-Object { $_.FullName -match "win64" } |
+            Select-Object -First 1
+        if ($NssmSource) {
+            Copy-Item $NssmSource.FullName $NssmTarget -Force
+            Write-NetoriumOk "Bundled NSSM service helper: $NssmTarget"
+        }
+    } catch {
+        Write-NetoriumWarn "NSSM was not bundled automatically. Controller install-service may fall back to Task Scheduler."
+    }
+}
+
 function Install-StandaloneRelease {
     New-Item -ItemType Directory -Force $BinDir *> $null
     $ResolvedBinDir = (Resolve-Path $BinDir).Path
@@ -342,6 +376,7 @@ function Install-StandaloneRelease {
         exit 1
     }
     Move-Item -Path $TempPath -Destination $TargetPath -Force
+    Install-BundledNssmIfMissing -TargetDir $ResolvedBinDir
 
     $VersionOutput = & $TargetPath version 2>$null
     if ($LASTEXITCODE -ne 0) {

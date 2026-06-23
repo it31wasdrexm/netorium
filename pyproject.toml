@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netorium-cli"
-version = "0.6.11"
+version = "0.7.0"
 description = "Cross-platform CLI for building-level network access control."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,7 +39,7 @@ netorium-agent = "netorium.cli.agent:app"
 include = ["netorium*"]
 
 [tool.setuptools.package-data]
-netorium = ["docs/*.md"]
+netorium = ["docs/*.md", "vendor/nssm/README.md"]
 
 [tool.ruff]
 line-length = 100

@@ -33,6 +33,7 @@ from netorium.services.windows_background import (
     build_schtasks_end_command,
     build_schtasks_run_command,
 )
+from netorium.services.windows_nssm import resolve_nssm_executable
 from netorium.services.windows_service import (
     build_sc_config_command,
     build_sc_create_command,
@@ -469,7 +470,7 @@ def _windows_service_action(action: str) -> str:
     reexec_windows_admin_if_needed(["agent", "service", action])
     executable = _find_netorium_executable()
     svc = _WINDOWS_SERVICE_NAME
-    nssm = shutil.which("nssm")
+    nssm = resolve_nssm_executable()
 
     if action == "install":
         agent_args = ["agent", "run-loop"]

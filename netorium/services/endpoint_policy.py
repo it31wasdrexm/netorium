@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from netorium.core.subprocess_utils import run_text_optional
+
 
 class EndpointPolicyError(RuntimeError):
     pass
@@ -178,12 +180,7 @@ def _run_powershell(script: str) -> None:
         script,
     )
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        completed = run_text_optional(command)
     except OSError as exc:
         raise EndpointPolicyError(f"Could not start PowerShell: {exc}") from exc
     if completed.returncode != 0:

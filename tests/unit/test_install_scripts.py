@@ -38,6 +38,8 @@ def test_windows_installer_supports_github_pypi_and_local_modes() -> None:
     assert "it31wasdrexm/netorium" in text
     assert "pipx install --force" in text
     assert "Get-PythonCommand" in text
+    assert "Test-WindowsStorePythonStub" in text
+    assert "Test-StandaloneNetoriumInstall" in text
     assert '"py"; Arguments = @("-3")' in text
     assert '"python"; Arguments = @()' in text
     assert '"python3"; Arguments = @()' in text

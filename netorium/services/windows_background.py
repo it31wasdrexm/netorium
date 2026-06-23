@@ -58,7 +58,7 @@ def build_firewall_add_command(port: int) -> list[str]:
         "firewall",
         "add",
         "rule",
-        "name=Netorium Controller",
+        'name="Netorium Controller"',
         "dir=in",
         "action=allow",
         "protocol=TCP",
@@ -74,5 +74,5 @@ def build_firewall_delete_command() -> list[str]:
         "firewall",
         "delete",
         "rule",
-        "name=Netorium Controller",
+        'name="Netorium Controller"',
     ]

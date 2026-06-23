@@ -21,6 +21,9 @@ import sys
 import textwrap
 from pathlib import Path
 
+from netorium.core.settings import ConfigError, load_settings
+from netorium.core.subprocess_utils import run_text, run_text_optional
+from netorium.services.controller import get_controller_status
 from netorium.services.linux_service_runtime import (
     LinuxServiceRuntime,
     build_sudo_reexec_command,
@@ -34,6 +37,14 @@ from netorium.services.windows_background import (
     build_schtasks_create_command,
     build_schtasks_delete_command,
     build_schtasks_run_command,
+)
+from netorium.services.windows_service import (
+    build_sc_config_command,
+    build_sc_create_command,
+    build_sc_delete_command,
+    build_sc_start_command,
+    build_sc_stop_command,
+    service_output_indicates_exists,
 )
 
 
@@ -67,6 +78,7 @@ def install_controller_service(
     if platform == "darwin":
         return _install_launchd(host=host, port=port)
     if platform.startswith("win"):
+        _ensure_controller_initialized()
         reexec_windows_admin_if_needed(["controller", "install-service", "--host", host, "--port", str(port)])
         return _install_windows_service(host=host, port=port)
     raise ControllerServiceError(
@@ -399,16 +411,28 @@ _WINDOWS_TASK_NAME = "NetoriumController"
 
 def _install_windows_service(host: str, port: int) -> str:
     executable = _find_executable("netorium")
+    controller_args = ["controller", "start", "--host", host, "--port", str(port), "--quiet"]
 
     # Prefer NSSM if available – it handles stdout/stderr better.
     nssm = shutil.which("nssm")
     if nssm:
         return _install_windows_nssm(nssm, executable, host, port)
-    return _install_windows_task(executable, host, port)
+
+    try:
+        return _install_windows_sc(
+            executable=executable,
+            args=controller_args,
+            port=port,
+            service_name=_WINDOWS_SERVICE_NAME,
+            display_name="Netorium Controller",
+        )
+    except ControllerServiceError:
+        return _install_windows_task(executable, host, port)
 
 
 def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> str:
     svc = _WINDOWS_SERVICE_NAME
+    _ensure_windows_programdata_dir()
     _remove_windows_service(svc, nssm=nssm)
     _run([nssm, "install", svc, executable,
           "controller", "start", "--host", host, "--port", str(port), "--quiet"])
@@ -424,6 +448,49 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
         f"  Logs:    C:\\ProgramData\\Netorium\\controller.log\n"
         f"  Stop:    sc stop {svc}\n"
         f"  Remove:  netorium controller uninstall-service"
+    )
+
+
+def _install_windows_sc(
+    *,
+    executable: str,
+    args: list[str],
+    port: int,
+    service_name: str,
+    display_name: str,
+) -> str:
+    create_cmd = build_sc_create_command(
+        service_name,
+        executable,
+        args,
+        display_name=display_name,
+    )
+    config_cmd = build_sc_config_command(
+        service_name,
+        executable,
+        args,
+        display_name=display_name,
+    )
+
+    try:
+        _run(create_cmd)
+    except ControllerServiceError as exc:
+        if not service_output_indicates_exists(str(exc)):
+            raise
+        _run(config_cmd)
+
+    _run_optional(build_sc_stop_command(service_name))
+    _run_optional(build_firewall_add_command(port))
+    _run(build_sc_start_command(service_name))
+    return (
+        f"Windows service '{service_name}' installed and started with sc.exe.\n"
+        f"  Status:  sc query {service_name}\n"
+        f"  Firewall: inbound TCP port {port} allowed.\n"
+        f"  Stop:    sc stop {service_name}\n"
+        f"  Remove:  netorium controller uninstall-service\n"
+        "\n"
+        "  Tip: Install NSSM (https://nssm.cc) for service logs under "
+        r"C:\ProgramData\Netorium\."
     )
 
 
@@ -462,8 +529,8 @@ def _remove_windows_service(svc: str, *, nssm: str | None = None) -> None:
         _run_optional([nssm, "remove", svc, "confirm"])
         return
 
-    _run_optional(["sc.exe", "stop", svc])
-    _run_optional(["sc.exe", "delete", svc])
+    _run_optional(build_sc_stop_command(svc))
+    _run_optional(build_sc_delete_command(svc))
 
 
 def _uninstall_windows_service() -> str:
@@ -482,6 +549,26 @@ def _uninstall_windows_service() -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _ensure_controller_initialized() -> None:
+    try:
+        settings = load_settings()
+        status = get_controller_status(settings.app.database_path)
+    except ConfigError as exc:
+        raise ControllerServiceError(str(exc)) from exc
+
+    if not status.initialized:
+        raise ControllerServiceError(
+            "Controller is not initialized. Run `netorium controller init` before install-service."
+        )
+
+
+def _ensure_windows_programdata_dir() -> None:
+    programdata = os.environ.get("ProgramData")
+    if not programdata:
+        return
+    Path(programdata, "Netorium").mkdir(parents=True, exist_ok=True)
+
 
 def _find_executable(name: str) -> str:
     if getattr(sys, "frozen", False):
@@ -504,7 +591,7 @@ def _find_executable(name: str) -> str:
 
 def _run(cmd: list[str]) -> None:
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        run_text(cmd)
     except FileNotFoundError as exc:
         raise ControllerServiceError(
             f"Command not found: {cmd[0]}. Is it installed and on PATH?"
@@ -524,7 +611,7 @@ def _run(cmd: list[str]) -> None:
 def _run_optional(cmd: list[str]) -> None:
     """Run a command, ignoring errors (used for cleanup steps)."""
     try:
-        subprocess.run(cmd, check=False, capture_output=True, text=True)
+        run_text_optional(cmd)
     except FileNotFoundError:
         pass
 

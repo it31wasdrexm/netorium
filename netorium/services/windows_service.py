@@ -64,3 +64,28 @@ def build_sc_config_command(
         "DisplayName=",
         display_name,
     ]
+
+
+def build_sc_start_command(service_name: str) -> list[str]:
+    """Build argument list for ``sc.exe start``."""
+    return ["sc.exe", "start", service_name]
+
+
+def build_sc_stop_command(service_name: str) -> list[str]:
+    """Build argument list for ``sc.exe stop``."""
+    return ["sc.exe", "stop", service_name]
+
+
+def build_sc_delete_command(service_name: str) -> list[str]:
+    """Build argument list for ``sc.exe delete``."""
+    return ["sc.exe", "delete", service_name]
+
+
+def service_output_indicates_exists(output: str) -> bool:
+    """Return whether ``sc.exe`` output means the service already exists."""
+    normalized = output.lower()
+    return (
+        "already exists" in normalized
+        or "1073" in normalized
+        or "уже существует" in normalized
+    )

@@ -23,9 +23,10 @@ class RunRecorder:
         self,
         command: Sequence[str],
         *,
-        check: bool,
-        capture_output: bool,
-        text: bool,
+        check: bool = False,
+        capture_output: bool = False,
+        text: bool = False,
+        **kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")

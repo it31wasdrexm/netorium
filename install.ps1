@@ -80,14 +80,42 @@ function Invoke-NetoriumSpinner {
     Write-NetoriumOk $Message
 }
 
+function Test-WindowsStorePythonStub {
+    param (
+        [string]$Command
+    )
+
+    $Resolved = Get-Command $Command -ErrorAction SilentlyContinue
+    if ($null -eq $Resolved) {
+        return $false
+    }
+
+    $Source = $Resolved.Source
+    if ([string]::IsNullOrWhiteSpace($Source)) {
+        return $false
+    }
+
+    return $Source -match '\\WindowsApps\\python.*\.exe$'
+}
+
 function Test-PythonCommand {
     param (
         [string]$Command,
         [string[]]$Arguments
     )
 
-    & $Command @($Arguments + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)")) *> $null
-    return $LASTEXITCODE -eq 0
+    if (Test-WindowsStorePythonStub -Command $Command) {
+        return $false
+    }
+
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "SilentlyContinue"
+        & $Command @($Arguments + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)")) *> $null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
 }
 
 function Get-PythonCommand {
@@ -98,12 +126,30 @@ function Get-PythonCommand {
     )
 
     foreach ($Candidate in $Candidates) {
+        if (Test-WindowsStorePythonStub -Command $Candidate.Command) {
+            continue
+        }
         if ((Get-Command $Candidate.Command -ErrorAction SilentlyContinue) -and (Test-PythonCommand $Candidate.Command $Candidate.Arguments)) {
             return $Candidate
         }
     }
 
     return $null
+}
+
+function Test-StandaloneNetoriumInstall {
+    $NetoriumCommand = Get-Command netorium -ErrorAction SilentlyContinue
+    if ($null -eq $NetoriumCommand) {
+        return $false
+    }
+
+    $Source = $NetoriumCommand.Source
+    if ([string]::IsNullOrWhiteSpace($Source)) {
+        return $false
+    }
+
+    $StandaloneRoot = (Join-Path $DefaultLocalAppData "Netorium").ToLowerInvariant()
+    return $Source.ToLowerInvariant().StartsWith($StandaloneRoot)
 }
 
 function Get-AssetArch {
@@ -356,7 +402,19 @@ if ($UpdateMode) {
 
 Resolve-PackageSpec
 
-if (Get-Command pipx -ErrorAction SilentlyContinue) {
+if ((Test-StandaloneNetoriumInstall) -or (-not (Get-Command pipx -ErrorAction SilentlyContinue) -and $null -eq (Get-PythonCommand))) {
+    if ($InstallSource -ne "github" -and [string]::IsNullOrWhiteSpace($StandaloneUrl)) {
+        Write-Error "Python 3.11+ or pipx is required for NETORIUM_INSTALL_SOURCE=$InstallSource. For no-Python machines, use the default GitHub installer or set NETORIUM_STANDALONE_URL."
+        exit 1
+    }
+
+    if (Test-StandaloneNetoriumInstall) {
+        Write-NetoriumStep "Refreshing standalone Netorium CLI"
+    } else {
+        Write-NetoriumWarn "Python 3.11+ or pipx was not found. Switching to standalone release."
+    }
+    Install-StandaloneRelease
+} elseif (Get-Command pipx -ErrorAction SilentlyContinue) {
     Invoke-NetoriumSpinner -Message "Installing with pipx" -Action {
         pipx install --force $PackageSpec
     }

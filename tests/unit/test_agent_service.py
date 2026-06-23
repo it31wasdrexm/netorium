@@ -158,6 +158,34 @@ def test_agent_enroll_reports_controller_failure(tmp_path: Path) -> None:
         )
 
 
+def test_agent_default_http_client_ignores_system_proxy() -> None:
+    from netorium.services.agent import _default_http_client
+
+    session = _default_http_client()
+    assert session.trust_env is False
+
+
+def test_agent_enroll_reports_connection_timeout_with_actionable_hints(tmp_path: Path) -> None:
+    client = FakeClient(
+        error=requests.ConnectionError(
+            "HTTPConnectionPool(host='10.0.0.5', port=8765): Max retries exceeded",
+            requests.ConnectTimeout("Connection timed out."),
+        )
+    )
+
+    with pytest.raises(AgentError, match="connection timed out") as exc_info:
+        enroll_agent(
+            controller_url="http://10.0.0.5:8765",
+            token="ng_enroll_secret",
+            state_path=tmp_path / "agent.json",
+            client=client,
+        )
+
+    message = str(exc_info.value)
+    assert "sudo ufw allow 8765/tcp" in message
+    assert "/health" in message
+
+
 def test_run_agent_once_requires_enrollment(tmp_path: Path) -> None:
     result = run_agent_once(tmp_path / "missing-agent.json")
 

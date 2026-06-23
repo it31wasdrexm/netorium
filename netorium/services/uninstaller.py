@@ -120,7 +120,11 @@ def build_uninstall_plan(
             )
             deferred_path_targets = _dedupe_targets(deferred_targets)
             path_targets = ()
-            package_command = _windows_deferred_remove_command(deferred_path_targets)
+            bin_dir = _windows_bin_dir(executable_path, data_dir=data_dir)
+            package_command = _windows_deferred_remove_command(
+                deferred_path_targets,
+                bin_dir=bin_dir,
+            )
         else:
             path_targets = _dedupe_targets(
                 [
@@ -294,13 +298,29 @@ def _windows_local_install_targets(
     ]
 
 
+def _windows_bin_dir(executable: Path, *, data_dir: Path) -> Path | None:
+    bin_dir = data_dir / "bin"
+    if _is_relative_to(executable, bin_dir):
+        return bin_dir
+    if executable.parent.name.lower() == "bin" and _is_relative_to(executable.parent, data_dir):
+        return executable.parent
+    if executable.name.lower() == "netorium.exe":
+        return executable.parent
+    return None
+
+
 def _windows_deferred_remove_command(
     targets: tuple[UninstallPathTarget, ...],
+    *,
+    bin_dir: Path | None = None,
 ) -> tuple[str, ...] | None:
-    if not targets:
+    if not targets and bin_dir is None:
         return None
 
-    commands = ["timeout /t 3 /nobreak >nul 2>nul"]
+    commands = [
+        "taskkill /IM netorium.exe /F >nul 2>nul",
+        "timeout /t 5 /nobreak >nul 2>nul",
+    ]
     for target in targets:
         quoted_path = _cmd_quote(target.path)
         quoted_directory_probe = _cmd_quote_string(f"{target.path}\\NUL")
@@ -308,7 +328,37 @@ def _windows_deferred_remove_command(
             f"if exist {quoted_directory_probe} rmdir /s /q {quoted_path} >nul 2>nul"
         )
         commands.append(f"if exist {quoted_path} del /f /q {quoted_path} >nul 2>nul")
+
+    if bin_dir is not None:
+        quoted_bin_dir = _cmd_quote(bin_dir)
+        quoted_bin_probe = _cmd_quote_string(f"{bin_dir}\\NUL")
+        commands.append(
+            f"if exist {quoted_bin_probe} rmdir /s /q {quoted_bin_dir} >nul 2>nul"
+        )
+        commands.extend(_windows_remove_path_entry_commands(bin_dir))
+
     return ("cmd.exe", "/d", "/c", " & ".join(commands))
+
+
+def _windows_remove_path_entry_commands(path_entry: Path) -> list[str]:
+    normalized = str(path_entry).rstrip("\\/")
+    if not normalized:
+        return []
+
+    quoted = _cmd_quote_string(normalized)
+    return [
+        (
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+            f"\"$entry={quoted}; "
+            "$path=[Environment]::GetEnvironmentVariable('Path','User'); "
+            "if ($path) { "
+            "$parts=$path -split ';' | Where-Object { "
+            "$_.TrimEnd('\\') -ine $entry.TrimEnd('\\') -and $_.Trim() -ne '' "
+            "}; "
+            "[Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User') "
+            "}\" >nul 2>nul"
+        ),
+    ]
 
 
 def _build_deferred_package_command(

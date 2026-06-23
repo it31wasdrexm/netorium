@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import requests
 
 from netorium.core.platform import user_config_path
+from netorium.core.subprocess_utils import run_text, run_text_optional
 from netorium.services.command_signing import hash_shared_secret, verify_agent_command_signature
 from netorium.services.endpoint_policy import (
     EndpointPolicyError,
@@ -31,6 +32,14 @@ from netorium.services.windows_background import (
     build_schtasks_delete_command,
     build_schtasks_end_command,
     build_schtasks_run_command,
+)
+from netorium.services.windows_service import (
+    build_sc_config_command,
+    build_sc_create_command,
+    build_sc_delete_command,
+    build_sc_start_command,
+    build_sc_stop_command,
+    service_output_indicates_exists,
 )
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -112,7 +121,7 @@ def enroll_agent(
     clean_controller_url = _normalize_controller_url(controller_url)
     clean_token = _normalize_text(token, "Enrollment token")
     clean_hostname = _normalize_text(hostname or socket.gethostname(), "Agent hostname")
-    active_client: HttpClient = client or cast(HttpClient, requests.Session())
+    active_client: HttpClient = client or cast(HttpClient, _default_http_client())
     enroll_url = f"{clean_controller_url}/enroll"
 
     try:
@@ -122,16 +131,11 @@ def enroll_agent(
             timeout=timeout,
         )
     except requests.Timeout as exc:
-        raise AgentError(
-            "Could not reach controller enrollment endpoint: connection timed out.\n"
-            f"  URL: {enroll_url}\n"
-            "  Check on the controller PC:\n"
-            "    - controller is running (`netorium controller status`)\n"
-            "    - background service is installed (`netorium controller install-service`)\n"
-            "    - Windows firewall allows inbound TCP on the controller port\n"
-            "  On this PC, verify network access with:\n"
-            f"    curl {clean_controller_url}/health"
-        ) from exc
+        raise _controller_unreachable_error(enroll_url, clean_controller_url) from exc
+    except requests.ConnectionError as exc:
+        if _looks_like_connection_timeout(exc):
+            raise _controller_unreachable_error(enroll_url, clean_controller_url) from exc
+        raise AgentError(f"Could not reach controller enrollment endpoint: {exc}") from exc
     except requests.RequestException as exc:
         raise AgentError(f"Could not reach controller enrollment endpoint: {exc}") from exc
 
@@ -211,7 +215,7 @@ def run_agent_once(
     except AgentError as exc:
         return AgentRunResult(enrolled=False, message=str(exc))
 
-    active_client: HttpClient = client or cast(HttpClient, requests.Session())
+    active_client: HttpClient = client or cast(HttpClient, _default_http_client())
     heartbeat_url = f"{state.controller_url}/heartbeat"
     try:
         response = active_client.post(
@@ -468,8 +472,12 @@ def _windows_service_action(action: str) -> str:
     nssm = shutil.which("nssm")
 
     if action == "install":
+        agent_args = ["agent", "run-loop"]
         if nssm:
-            _run_service_cmd([nssm, "install", svc, executable, "agent", "run-loop"])
+            _ensure_windows_programdata_dir()
+            _run_service_cmd_optional([nssm, "stop", svc])
+            _run_service_cmd_optional([nssm, "remove", svc, "confirm"])
+            _run_service_cmd([nssm, "install", svc, executable, *agent_args])
             _run_service_cmd([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
             _run_service_cmd([nssm, "set", svc, "AppStdout",
                               r"C:\ProgramData\Netorium\agent.log"])
@@ -483,35 +491,46 @@ def _windows_service_action(action: str) -> str:
                 f"  Remove:  netorium agent service uninstall"
             )
 
-        task = _WINDOWS_TASK_NAME
-        _run_service_cmd_optional(build_schtasks_delete_command(task))
-        _run_service_cmd(
-            build_schtasks_create_command(
-                task,
-                executable,
-                ["agent", "run-loop"],
+        try:
+            return _install_windows_agent_sc(
+                executable=executable,
+                args=agent_args,
+                service_name=svc,
             )
-        )
-        _run_service_cmd(build_schtasks_run_command(task))
-        return (
-            f"[Windows] Agent scheduled task '{task}' installed and started.\n"
-            f"  Runs at logon and keeps the agent connected in the background.\n"
-            f"  Status:  schtasks /Query /TN {task}\n"
-            f"  Remove:  netorium agent service uninstall\n"
-            "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
-        )
+        except AgentError:
+            task = _WINDOWS_TASK_NAME
+            _run_service_cmd_optional(build_schtasks_delete_command(task))
+            _run_service_cmd(
+                build_schtasks_create_command(
+                    task,
+                    executable,
+                    agent_args,
+                )
+            )
+            _run_service_cmd(build_schtasks_run_command(task))
+            return (
+                f"[Windows] Agent scheduled task '{task}' installed and started.\n"
+                f"  Runs at logon and keeps the agent connected in the background.\n"
+                f"  Status:  schtasks /Query /TN {task}\n"
+                f"  Remove:  netorium agent service uninstall\n"
+                "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
+            )
 
     if action == "start":
         if nssm:
             _run_service_cmd([nssm, "start", svc])
         else:
-            _run_service_cmd(build_schtasks_run_command(_WINDOWS_TASK_NAME))
+            try:
+                _run_service_cmd(build_sc_start_command(svc))
+            except AgentError:
+                _run_service_cmd(build_schtasks_run_command(_WINDOWS_TASK_NAME))
         return f"[Windows] Agent background task/service started."
 
     if action == "stop":
         if nssm:
             _run_service_cmd([nssm, "stop", svc])
         else:
+            _run_service_cmd_optional(build_sc_stop_command(svc))
             _run_service_cmd_optional(build_schtasks_end_command(_WINDOWS_TASK_NAME))
         return "[Windows] Agent background task/service stopped."
 
@@ -521,8 +540,8 @@ def _windows_service_action(action: str) -> str:
             _run_service_cmd_optional([nssm, "remove", svc, "confirm"])
         else:
             _run_service_cmd_optional(build_schtasks_delete_command(_WINDOWS_TASK_NAME))
-        _run_service_cmd_optional(["sc", "stop", svc])
-        _run_service_cmd_optional(["sc", "delete", svc])
+        _run_service_cmd_optional(build_sc_stop_command(svc))
+        _run_service_cmd_optional(build_sc_delete_command(svc))
         return f"[Windows] Agent background task/service removed."
 
     raise AgentError(f"Unknown service action: {action}")
@@ -532,7 +551,7 @@ def _windows_service_action(action: str) -> str:
 
 def _run_service_cmd(cmd: list[str]) -> None:
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        run_text(cmd)
     except FileNotFoundError as exc:
         raise AgentError(f"Command not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:
@@ -543,7 +562,7 @@ def _run_service_cmd(cmd: list[str]) -> None:
 def _run_service_cmd_optional(cmd: list[str]) -> None:
     """Run a command, ignoring errors (used for cleanup steps)."""
     try:
-        subprocess.run(cmd, check=False, capture_output=True, text=True)
+        run_text_optional(cmd)
     except FileNotFoundError:
         pass
 
@@ -791,6 +810,88 @@ def _write_state(state: AgentState) -> None:
         )
     except OSError as exc:
         raise AgentError(f"Could not write agent state {state.state_path}: {exc}") from exc
+
+
+def _install_windows_agent_sc(
+    *,
+    executable: str,
+    args: list[str],
+    service_name: str,
+) -> str:
+    create_cmd = build_sc_create_command(
+        service_name,
+        executable,
+        args,
+        display_name="Netorium Agent",
+    )
+    config_cmd = build_sc_config_command(
+        service_name,
+        executable,
+        args,
+        display_name="Netorium Agent",
+    )
+
+    try:
+        _run_service_cmd(create_cmd)
+    except AgentError as exc:
+        if not service_output_indicates_exists(str(exc)):
+            raise
+        _run_service_cmd(config_cmd)
+
+    _run_service_cmd_optional(build_sc_stop_command(service_name))
+    _run_service_cmd(build_sc_start_command(service_name))
+    return (
+        f"[Windows/sc.exe] Agent service '{service_name}' installed and started.\n"
+        f"  Status:  sc query {service_name}\n"
+        f"  Remove:  netorium agent service uninstall\n"
+        "\n"
+        "  Tip: Install NSSM (https://nssm.cc) for service logs under "
+        r"C:\ProgramData\Netorium\."
+    )
+
+
+def _ensure_windows_programdata_dir() -> None:
+    programdata = os.environ.get("ProgramData")
+    if not programdata:
+        return
+    Path(programdata, "Netorium").mkdir(parents=True, exist_ok=True)
+
+
+def _default_http_client() -> requests.Session:
+    """Build an HTTP client that ignores OS proxy settings for LAN controllers."""
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
+def _looks_like_connection_timeout(exc: requests.ConnectionError) -> bool:
+    message = str(exc).lower()
+    if "timed out" in message or "timeout" in message:
+        return True
+
+    cause = exc.__cause__
+    while cause is not None:
+        cause_message = str(cause).lower()
+        if "timed out" in cause_message or "timeout" in cause_message:
+            return True
+        cause = getattr(cause, "__cause__", None)
+    return False
+
+
+def _controller_unreachable_error(enroll_url: str, controller_url: str) -> AgentError:
+    return AgentError(
+        "Could not reach controller enrollment endpoint: connection timed out.\n"
+        f"  URL: {enroll_url}\n"
+        "  Check on the controller PC:\n"
+        "    - controller is running (`netorium controller status`)\n"
+        "    - background service is installed (`netorium controller install-service`)\n"
+        "    - firewall allows inbound TCP on the controller port\n"
+        "      Windows: `netorium controller install-service` adds the rule automatically\n"
+        "      Linux: `sudo ufw allow 8765/tcp` or open the port in your firewall\n"
+        "    - controller listens on 0.0.0.0, not only 127.0.0.1\n"
+        "  On this PC, verify network access with:\n"
+        f"    curl {controller_url}/health"
+    )
 
 
 def _normalize_controller_url(controller_url: str) -> str:

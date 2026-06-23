@@ -226,10 +226,33 @@ function Ensure-NssmReleaseAsset {
 
     $NssmArchivePath = Join-Path $BuildTempDir "nssm.zip"
     $NssmExtractDir = Join-Path $BuildTempDir "nssm"
-    $NssmDownloadUrl = "https://nssm.cc/release/nssm-2.24.zip"
 
-    Write-Host "Downloading NSSM for Windows service installs: $NssmDownloadUrl"
-    Invoke-WebRequest -Uri $NssmDownloadUrl -OutFile $NssmArchivePath
+    # Multiple mirrors in order of preference – nssm.cc has intermittent 503 errors.
+    $NssmMirrors = @(
+        "https://nssm.cc/release/nssm-2.24.zip",
+        "https://github.com/kirillkovalenko/nssm/releases/download/nssm-2.24/nssm-2.24.zip",
+        "https://objects.githubusercontent.com/github-production-release-asset-2e65be/nssm/nssm-2.24.zip"
+    )
+
+    $Downloaded = $false
+    foreach ($NssmDownloadUrl in $NssmMirrors) {
+        Write-Host "Downloading NSSM for Windows service installs: $NssmDownloadUrl"
+        try {
+            Invoke-WebRequest -Uri $NssmDownloadUrl -OutFile $NssmArchivePath -TimeoutSec 30 -ErrorAction Stop
+            $Downloaded = $true
+            break
+        } catch {
+            Write-Warning "Failed to download from $NssmDownloadUrl : $_"
+        }
+    }
+
+    if (-not $Downloaded) {
+        Write-Warning "All NSSM download mirrors failed. Build will proceed without NSSM."
+        Write-Warning "The standalone exe will use sc.exe or Task Scheduler for background service."
+        Write-Warning "You can manually place nssm.exe next to netorium.exe to enable NSSM service support."
+        return $null
+    }
+
     if (Test-Path $NssmExtractDir) {
         Remove-Item $NssmExtractDir -Recurse -Force
     }
@@ -239,7 +262,8 @@ function Ensure-NssmReleaseAsset {
         Where-Object { $_.FullName -match "win64" } |
         Select-Object -First 1
     if (-not $NssmSource) {
-        throw "Could not find win64/nssm.exe in the downloaded NSSM archive."
+        Write-Warning "Could not find win64/nssm.exe in the downloaded NSSM archive. Skipping NSSM bundle."
+        return $null
     }
 
     New-Item -ItemType Directory -Force -Path $AssetDir | Out-Null

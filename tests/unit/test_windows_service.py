@@ -106,7 +106,11 @@ def test_build_firewall_add_command_uses_controller_port() -> None:
     assert "localport=8765" in command
     assert "profile=any" in command
     assert "enable=yes" in command
-    assert 'name="Netorium Controller"' in command
+    # subprocess passes each list element as a separate argument to CreateProcess;
+    # embedding shell-style quotes like 'name="Netorium Controller"' causes netsh
+    # to see literal quote chars in the rule name, producing a syntax error.
+    assert "name=Netorium Controller" in command
+    assert 'name="Netorium Controller"' not in command
 
 
 def test_service_output_indicates_exists() -> None:

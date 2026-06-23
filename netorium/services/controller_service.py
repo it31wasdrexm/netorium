@@ -459,17 +459,19 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
     _run([nssm, "set", svc, "AppDirectory", str(Path(executable).parent)])
     _run([nssm, "set", svc, "AppStdout", r"C:\ProgramData\Netorium\controller.log"])
     _run([nssm, "set", svc, "AppStderr", r"C:\ProgramData\Netorium\controller.err"])
-    _configure_windows_firewall(executable=executable, port=port)
+    fw_warnings = _configure_windows_firewall(executable=executable, port=port)
     _run([nssm, "start", svc])
-    return (
-        f"Windows service '{svc}' installed and started with bundled NSSM.\n"
-        f"  Listen:  http://{host}:{port}\n"
-        f"  Status:  sc query {svc}\n"
-        f"  Firewall: inbound TCP port {port} allowed on all profiles.\n"
-        f"  Logs:    C:\\ProgramData\\Netorium\\controller.log\n"
-        f"  Stop:    sc stop {svc}\n"
-        f"  Remove:  netorium controller uninstall-service"
-    )
+    parts = [
+        f"Windows service '{svc}' installed and started with bundled NSSM.",
+        f"  Listen:  http://{host}:{port}",
+        f"  Status:  sc query {svc}",
+        f"  Firewall: inbound TCP port {port} allowed on all profiles.",
+        f"  Logs:    C:\\ProgramData\\Netorium\\controller.log",
+        f"  Stop:    sc stop {svc}",
+        f"  Remove:  netorium controller uninstall-service",
+    ]
+    parts.extend(fw_warnings)
+    return "\n".join(parts)
 
 
 def _install_windows_sc(
@@ -502,16 +504,18 @@ def _install_windows_sc(
         _run(config_cmd)
 
     _run_optional(build_sc_stop_command(service_name))
-    _configure_windows_firewall(executable=executable, port=port)
+    fw_warnings = _configure_windows_firewall(executable=executable, port=port)
     _run(build_sc_start_command(service_name))
-    return (
-        f"Windows service '{service_name}' installed and started with sc.exe.\n"
-        f"  Listen:  http://{host}:{port}\n"
-        f"  Status:  sc query {service_name}\n"
-        f"  Firewall: inbound TCP port {port} allowed on all profiles.\n"
-        f"  Stop:    sc stop {service_name}\n"
-        f"  Remove:  netorium controller uninstall-service"
-    )
+    parts = [
+        f"Windows service '{service_name}' installed and started with sc.exe.",
+        f"  Listen:  http://{host}:{port}",
+        f"  Status:  sc query {service_name}",
+        f"  Firewall: inbound TCP port {port} allowed on all profiles.",
+        f"  Stop:    sc stop {service_name}",
+        f"  Remove:  netorium controller uninstall-service",
+    ]
+    parts.extend(fw_warnings)
+    return "\n".join(parts)
 
 
 def _install_windows_task(executable: str, host: str, port: int) -> str:
@@ -525,17 +529,19 @@ def _install_windows_task(executable: str, host: str, port: int) -> str:
             controller_args,
         )
     )
-    _configure_windows_firewall(executable=executable, port=port)
+    fw_warnings = _configure_windows_firewall(executable=executable, port=port)
     _run(build_schtasks_run_command(task))
-    return (
-        f"Windows scheduled task '{task}' installed and started.\n"
-        f"  Listen:  http://{host}:{port}\n"
-        f"  Runs at logon and starts the controller in the background.\n"
-        f"  Firewall: inbound TCP port {port} allowed on all profiles.\n"
-        f"  Status:  schtasks /Query /TN {task}\n"
-        f"  Stop:    taskkill /IM netorium.exe /F\n"
-        f"  Remove:  netorium controller uninstall-service"
-    )
+    parts = [
+        f"Windows scheduled task '{task}' installed and started.",
+        f"  Listen:  http://{host}:{port}",
+        f"  Runs at logon and starts the controller in the background.",
+        f"  Firewall: inbound TCP port {port} allowed on all profiles.",
+        f"  Status:  schtasks /Query /TN {task}",
+        f"  Stop:    taskkill /IM netorium.exe /F",
+        f"  Remove:  netorium controller uninstall-service",
+    ]
+    parts.extend(fw_warnings)
+    return "\n".join(parts)
 
 
 def _remove_windows_task(task_name: str) -> None:
@@ -590,11 +596,36 @@ def _ensure_windows_programdata_dir() -> None:
     Path(programdata, "Netorium").mkdir(parents=True, exist_ok=True)
 
 
-def _configure_windows_firewall(*, executable: str, port: int) -> None:
+def _configure_windows_firewall(*, executable: str, port: int) -> list[str]:
+    """Add Windows Firewall inbound rules for the Netorium Controller.
+
+    Returns a list of warning strings (empty when all rules were added successfully).
+    Firewall configuration is non-fatal so the service is still installed even if
+    netsh fails (e.g. partial admin rights or policy restriction).
+    """
     _run_optional(build_firewall_delete_command())
     _run_optional(build_firewall_delete_program_command())
-    _run(build_firewall_add_command(port))
-    _run(build_firewall_add_program_command(executable))
+    warnings: list[str] = []
+    try:
+        _run(build_firewall_add_command(port))
+    except ControllerServiceError as exc:
+        warnings.append(
+            f"  Warning: Could not add Windows Firewall port rule (TCP {port}): {exc}\n"
+            f"  Add the rule manually (run as Administrator):\n"
+            f"    netsh advfirewall firewall add rule name=\"Netorium Controller\" "
+            f"dir=in action=allow protocol=TCP localport={port} profile=any enable=yes"
+        )
+        return warnings
+    try:
+        _run(build_firewall_add_program_command(executable))
+    except ControllerServiceError as exc:
+        warnings.append(
+            f"  Warning: Could not add Windows Firewall program rule for '{executable}': {exc}\n"
+            "  The port rule was added successfully; inbound connections should still work."
+        )
+    return warnings
+
+
 
 
 def _append_windows_service_health_note(message: str, *, host: str, port: int) -> str:

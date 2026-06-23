@@ -53,13 +53,17 @@ def build_schtasks_end_command(task_name: str) -> list[str]:
 
 def build_firewall_add_command(port: int, *, program: str | None = None) -> list[str]:
     """Allow inbound TCP traffic for the controller listen port."""
+    # NOTE: subprocess passes each list element as a separate argument via CreateProcess.
+    # netsh expects name= without shell-style quotes around the value; the OS handles
+    # any spaces in the value automatically. Embedding quotes like 'name="foo"' causes
+    # netsh to see a literal quote character in the rule name, producing a syntax error.
     command = [
         "netsh",
         "advfirewall",
         "firewall",
         "add",
         "rule",
-        'name="Netorium Controller"',
+        "name=Netorium Controller",
         "dir=in",
         "action=allow",
         "protocol=TCP",
@@ -68,22 +72,24 @@ def build_firewall_add_command(port: int, *, program: str | None = None) -> list
         "enable=yes",
     ]
     if program:
-        command.append(f'program="{program}"')
+        command.append(f"program={program}")
     return command
 
 
 def build_firewall_add_program_command(program: str) -> list[str]:
     """Allow inbound traffic for the Netorium executable."""
+    # NOTE: subprocess passes each list element as a separate argument via CreateProcess.
+    # Do not embed shell-style quotes inside the argument strings.
     return [
         "netsh",
         "advfirewall",
         "firewall",
         "add",
         "rule",
-        'name="Netorium Controller App"',
+        "name=Netorium Controller App",
         "dir=in",
         "action=allow",
-        f'program="{program}"',
+        f"program={program}",
         "profile=any",
         "enable=yes",
     ]
@@ -97,7 +103,7 @@ def build_firewall_delete_command() -> list[str]:
         "firewall",
         "delete",
         "rule",
-        'name="Netorium Controller"',
+        "name=Netorium Controller",
     ]
 
 
@@ -109,5 +115,5 @@ def build_firewall_delete_program_command() -> list[str]:
         "firewall",
         "delete",
         "rule",
-        'name="Netorium Controller App"',
+        "name=Netorium Controller App",
     ]

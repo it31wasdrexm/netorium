@@ -116,6 +116,17 @@ Windows, run PowerShell or Windows Terminal as Administrator before calling
 `netorium controller uninstall-service` if Windows reports that it already
 exists.
 
+For LAN enrollment, first test controller reachability from the endpoint PC:
+
+```powershell
+curl http://CONTROLLER_IP:8765/health
+Test-NetConnection CONTROLLER_IP -Port 8765
+```
+
+If both commands fail on the endpoint but work on the controller PC, fix the
+network path before running `netorium-agent enroll`: verify same LAN/VPN,
+Windows firewall/profile settings, and router or guest Wi-Fi client isolation.
+
 ## Policy Shortcuts
 
 Shorter commands for everyday endpoint blocking. Target one agent by ID,

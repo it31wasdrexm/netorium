@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import requests
 from typer.testing import CliRunner
 
 import netorium.cli.agent as agent_module
+import netorium.services.agent as agent_service
 from netorium.cli.agent import app
 from netorium.services.agent import AgentCommandExecution, AgentRunResult, AgentState, enroll_agent
 from tests.unit.path_helpers import isolated_user_env
@@ -127,6 +129,31 @@ def test_agent_status_and_run_before_enroll(tmp_path: Path) -> None:
     assert "netorium agent enroll" in status_result.output
     assert run_result.exit_code == 1
     assert "not enrolled" in run_result.output
+
+
+def test_agent_enroll_timeout_explains_lan_diagnostics(monkeypatch) -> None:
+    class TimeoutClient:
+        def post(self, url: str, json: dict[str, str], timeout: float):
+            raise requests.Timeout("connection timed out")
+
+    monkeypatch.setattr(agent_service, "_default_http_client", lambda: TimeoutClient())
+
+    result = runner.invoke(
+        app,
+        [
+            "enroll",
+            "--controller",
+            "http://10.202.185.108:8765",
+            "--token",
+            "ng_enroll_secret",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "not a token problem" in result.output
+    assert "curl http://10.202.185.108:8765/health" in result.output
+    assert "Test-NetConnection 10.202.185.108 -Port 8765" in result.output
+    assert "client isolation" in result.output
 
 
 def test_agent_service_and_update_commands(monkeypatch) -> None:

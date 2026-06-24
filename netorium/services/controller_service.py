@@ -690,7 +690,10 @@ def _format_windows_lan_health_hint(*, host: str, port: int) -> str | None:
 
     return (
         f"  LAN test: curl http://{lan_host}:{port}/health\n"
-        f"  Enrollment from other PCs: http://{lan_host}:{port}/enroll"
+        f"  Enrollment from other PCs: http://{lan_host}:{port}/enroll\n"
+        "  If another PC cannot connect, run there:\n"
+        f"    Test-NetConnection {lan_host} -Port {port}\n"
+        "  If that fails, check Windows network profile/firewall rules and router/Wi-Fi client isolation."
     )
 
 

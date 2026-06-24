@@ -447,8 +447,9 @@ def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
 def _render_uninstall_result(result: UninstallResult, *, plan: UninstallPlan) -> None:
     if result.package_command_ran:
         if plan.package_command_detached:
-            console.print("Package uninstall scheduled after Netorium exits.")
-            if plan.package_command is not None:
+            console.print("Package uninstall cleanup scheduled after Netorium exits.")
+            console.print("Wait a few seconds, then open a new terminal before checking `netorium` again.")
+            if plan.package_command is not None and not sys.platform.startswith("win"):
                 console.print(f"Scheduled command: {format_command(plan.package_command)}")
         else:
             console.print("Package uninstall command completed.")

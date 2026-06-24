@@ -105,12 +105,24 @@ def test_build_firewall_add_command_uses_controller_port() -> None:
     command = build_firewall_add_command(8765)
     assert "localport=8765" in command
     assert "profile=any" in command
+    assert "interfacetype=any" in command
     assert "enable=yes" in command
     # subprocess passes each list element as a separate argument to CreateProcess;
     # embedding shell-style quotes like 'name="Netorium Controller"' causes netsh
     # to see literal quote chars in the rule name, producing a syntax error.
     assert "name=Netorium Controller" in command
     assert 'name="Netorium Controller"' not in command
+
+
+def test_windows_lan_health_hint_includes_remote_diagnostics(monkeypatch) -> None:
+    monkeypatch.setattr(controller_service, "_detect_windows_lan_host", lambda: "10.202.185.108")
+
+    hint = controller_service._format_windows_lan_health_hint(host="0.0.0.0", port=8765)
+
+    assert hint is not None
+    assert "curl http://10.202.185.108:8765/health" in hint
+    assert "Test-NetConnection 10.202.185.108 -Port 8765" in hint
+    assert "client isolation" in hint
 
 
 def test_service_output_indicates_exists() -> None:

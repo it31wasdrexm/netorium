@@ -388,7 +388,7 @@ def _windows_remove_path_entry_commands(path_entry: Path) -> list[str]:
     if not normalized:
         return []
 
-    quoted = _cmd_quote_string(normalized)
+    quoted = _powershell_single_quote(normalized)
     return [
         (
             "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
@@ -577,17 +577,7 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
             'del /f /q "%~f0" >nul 2>nul',
         ]
         script_path.write_text("\r\n".join(script_lines), encoding="utf-8")
-        launch_args = (
-            "cmd.exe",
-            "/c",
-            "start",
-            "",
-            "/MIN",
-            "cmd.exe",
-            "/d",
-            "/c",
-            _cmd_quote_string(str(script_path)),
-        )
+        launch_args = ("cmd.exe", "/d", "/c", str(script_path))
     else:
         launch_args = args
 
@@ -615,6 +605,10 @@ def _cmd_quote(path: Path) -> str:
 
 def _cmd_quote_string(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def _powershell_single_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _quote_display_part(value: str) -> str:

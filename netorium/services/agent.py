@@ -880,9 +880,13 @@ def _looks_like_connection_timeout(exc: requests.ConnectionError) -> bool:
 
 
 def _controller_unreachable_error(enroll_url: str, controller_url: str) -> AgentError:
+    parsed = urlparse(controller_url)
+    host = parsed.hostname or "CONTROLLER_IP"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return AgentError(
         "Could not reach controller enrollment endpoint: connection timed out.\n"
         f"  URL: {enroll_url}\n"
+        "  This is a network reachability problem, not a token problem.\n"
         "  Check on the controller PC:\n"
         "    - controller is running (`netorium controller status`)\n"
         "    - background service is installed (`netorium controller install-service`)\n"
@@ -891,7 +895,9 @@ def _controller_unreachable_error(enroll_url: str, controller_url: str) -> Agent
         "      Linux: `sudo ufw allow 8765/tcp` or open the port in your firewall\n"
         "    - controller listens on 0.0.0.0, not only 127.0.0.1\n"
         "  On this PC, verify network access with:\n"
-        f"    curl {controller_url}/health"
+        f"    curl {controller_url}/health\n"
+        f"    Test-NetConnection {host} -Port {port}\n"
+        "  If both fail, check that both PCs are on the same LAN/VPN and that guest Wi-Fi/client isolation is disabled."
     )
 
 

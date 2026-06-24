@@ -233,6 +233,18 @@ netorium controller uninstall-service
 netorium controller install-service
 ```
 
+After installation, verify access from another PC before enrolling agents:
+
+```powershell
+curl http://CONTROLLER_IP:8765/health
+Test-NetConnection CONTROLLER_IP -Port 8765
+```
+
+If these checks fail from the second PC while they pass on the controller PC,
+the enrollment token is not the problem. Check that both computers are on the
+same LAN/VPN, that the Windows network profile and firewall allow inbound TCP
+8765, and that router or guest Wi-Fi client isolation is disabled.
+
 ## Uninstall
 
 Use the guided command for normal removal:
@@ -255,8 +267,10 @@ For automation:
 netorium uninstall --yes --remove-data
 ```
 
-On Windows standalone installs, Netorium schedules removal of the running
-`%LOCALAPPDATA%\Netorium\bin\netorium.exe` after the CLI process exits.
+On Windows standalone installs, Netorium schedules cleanup through a temporary
+`.cmd` script after the CLI process exits. Wait a few seconds and open a new
+terminal before checking that `%LOCALAPPDATA%\Netorium\bin\netorium.exe` and the
+user `PATH` entry are gone.
 
 ## Docker
 

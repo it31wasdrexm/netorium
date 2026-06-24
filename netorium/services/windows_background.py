@@ -69,6 +69,7 @@ def build_firewall_add_command(port: int, *, program: str | None = None) -> list
         "protocol=TCP",
         f"localport={port}",
         "profile=any",
+        "interfacetype=any",
         "enable=yes",
     ]
     if program:

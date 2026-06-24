@@ -1,8 +1,10 @@
+import os
 from pathlib import Path
 
 import pytest
 
 from netorium.core.settings import CONFIG_TEMPLATE
+import netorium.services.uninstaller as uninstaller_service
 from netorium.services.uninstaller import (
     UninstallError,
     build_uninstall_plan,
@@ -99,6 +101,8 @@ def test_uninstall_plan_handles_windows_standalone_when_frozen(
     assert "timeout /t 2" in plan.package_command[3]
     assert "taskkill /IM netorium.exe /F" in plan.package_command[3]
     assert "Netorium" in plan.package_command[3]
+    assert "$entry='C:" in plan.package_command[3]
+    assert "$entry=\"C:" not in plan.package_command[3]
     assert [target.label for target in plan.deferred_path_targets] == [
         "Configuration directory",
         "Application data directory",
@@ -157,6 +161,30 @@ def test_execute_uninstall_plan_removes_requested_data_paths(tmp_path: Path) -> 
     assert (tmp_path / "data" / "netorium").exists() is False
     assert (tmp_path / "cache" / "netorium").exists() is False
     assert result.deferred_paths == ()
+
+
+def test_windows_cleanup_detached_launches_script_without_start_parser(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    launched: list[tuple[str, ...]] = []
+
+    class FakePopen:
+        def __init__(self, args: tuple[str, ...], **_kwargs: object) -> None:
+            launched.append(args)
+
+    monkeypatch.setattr(uninstaller_service.sys, "platform", "win32")
+    monkeypatch.setattr(uninstaller_service.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(uninstaller_service.subprocess, "Popen", FakePopen)
+
+    exit_code = uninstaller_service._run_windows_cleanup_detached(
+        ("cmd.exe", "/d", "/c", "echo cleanup")
+    )
+
+    assert exit_code == 0
+    script_path = tmp_path / f"netorium-uninstall-{os.getpid()}.cmd"
+    assert launched == [("cmd.exe", "/d", "/c", str(script_path))]
+    assert "start" not in launched[0]
 
 
 def _write_config_and_data(tmp_path: Path) -> dict[str, str]:

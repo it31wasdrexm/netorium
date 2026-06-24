@@ -466,6 +466,14 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
           "controller", "start", "--host", host, "--port", str(port), "--quiet"])
     _run([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
     _run([nssm, "set", svc, "AppDirectory", str(Path(executable).parent)])
+    
+    env_args = []
+    for var in ("USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOME"):
+        if val := os.environ.get(var):
+            env_args.append(f"{var}={val}")
+    if env_args:
+        _run([nssm, "set", svc, "AppEnvironmentExtra", *env_args])
+        
     _run([nssm, "set", svc, "AppStdout", r"C:\ProgramData\Netorium\controller.log"])
     _run([nssm, "set", svc, "AppStderr", r"C:\ProgramData\Netorium\controller.err"])
     fw_warnings = _configure_windows_firewall(executable=executable, port=port)

@@ -378,8 +378,8 @@ def _windows_remove_path_commands(path: Path) -> list[str]:
     quoted_path = _cmd_quote(path)
     quoted_dir_probe = _cmd_quote_string(f"{path}\\")
     return [
-        f"if exist {quoted_dir_probe} rmdir /s /q {quoted_path} >nul 2>nul",
-        f"if exist {quoted_path} del /f /q {quoted_path} >nul 2>nul",
+        f"if exist {quoted_dir_probe} ( rmdir /s /q {quoted_path} >nul 2>nul )",
+        f"if exist {quoted_path} ( del /f /q {quoted_path} >nul 2>nul )",
     ]
 
 

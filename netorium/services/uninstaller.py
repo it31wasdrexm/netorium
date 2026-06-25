@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ntpath
 import os
 import re
 import shlex
@@ -309,6 +310,12 @@ def _windows_bin_dir(executable: Path, *, data_dir: Path) -> Path | None:
         return executable.parent
     if executable.name.lower() == "netorium.exe":
         return executable.parent
+    raw_executable = str(executable)
+    normalized_executable = raw_executable.replace("/", "\\")
+    if ntpath.basename(normalized_executable).lower() == "netorium.exe":
+        parent = ntpath.dirname(normalized_executable)
+        if ntpath.basename(parent).lower() == "bin":
+            return Path(parent)
     return None
 
 
@@ -376,7 +383,7 @@ def _sort_windows_removal_paths(paths: list[Path]) -> list[Path]:
 
 def _windows_remove_path_commands(path: Path) -> list[str]:
     quoted_path = _cmd_quote(path)
-    quoted_dir_probe = _cmd_quote_string(f"{path}\\")
+    quoted_dir_probe = _cmd_quote_string(f"{_windows_path_text(path)}\\NUL")
     return [
         f"if exist {quoted_dir_probe} ( rmdir /s /q {quoted_path} >nul 2>nul )",
         f"if exist {quoted_path} ( del /f /q {quoted_path} >nul 2>nul )",
@@ -384,7 +391,7 @@ def _windows_remove_path_commands(path: Path) -> list[str]:
 
 
 def _windows_remove_path_entry_commands(path_entry: Path) -> list[str]:
-    normalized = str(path_entry).rstrip("\\/")
+    normalized = _windows_path_text(path_entry).rstrip("\\/")
     if not normalized:
         return []
 
@@ -544,15 +551,14 @@ def _run_command_detached(args: tuple[str, ...]) -> int:
     if sys.platform.startswith("win"):
         return _run_windows_cleanup_detached(args)
 
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
-    }
-
     try:
-        subprocess.Popen(args, **kwargs)
+        subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
     except FileNotFoundError as exc:
         raise UninstallError(
             f"Command not found while scheduling uninstall cleanup: {args[0]}"
@@ -561,6 +567,7 @@ def _run_command_detached(args: tuple[str, ...]) -> int:
 
 
 def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
+    launch_args: tuple[str, ...]
     if len(args) >= 4 and args[0] == "cmd.exe" and args[1] == "/d" and args[2] == "/c":
         cleanup_body = args[3]
         parent_pid = os.getpid()
@@ -568,10 +575,10 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
         script_lines = [
             "@echo off",
             "setlocal",
-            ":wait_parent",
             (
-                f'tasklist /FI "PID eq {parent_pid}" 2>nul | find /I "{parent_pid}" >nul '
-                "&& (timeout /t 1 /nobreak >nul 2>nul & goto wait_parent)"
+                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+                f"\"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue\" "
+                ">nul 2>nul"
             ),
             cleanup_body,
             'del /f /q "%~f0" >nul 2>nul',
@@ -581,17 +588,16 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
     else:
         launch_args = args
 
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
-        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        | getattr(subprocess, "DETACHED_PROCESS", 0),
-    }
-
     try:
-        subprocess.Popen(launch_args, **kwargs)
+        subprocess.Popen(
+            launch_args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0),
+        )
     except FileNotFoundError as exc:
         raise UninstallError(
             f"Command not found while scheduling uninstall cleanup: {launch_args[0]}"
@@ -600,7 +606,11 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
 
 
 def _cmd_quote(path: Path) -> str:
-    return _cmd_quote_string(str(path))
+    return _cmd_quote_string(_windows_path_text(path))
+
+
+def _windows_path_text(path: Path) -> str:
+    return str(path).replace("/", "\\")
 
 
 def _cmd_quote_string(value: str) -> str:

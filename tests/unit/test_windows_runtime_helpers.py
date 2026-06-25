@@ -48,7 +48,7 @@ def test_windows_cleanup_script_orders_deepest_paths_first(tmp_path: Path) -> No
 
     rmdir_lines = [line for line in script_lines if "rmdir /s /q" in line]
     cache_index = next(index for index, line in enumerate(rmdir_lines) if "Cache" in line)
-    quoted_data_dir = f'"{data_dir}"'
+    quoted_data_dir = '"' + str(data_dir).replace("/", "\\") + '"'
     data_index = next(
         index
         for index, line in enumerate(rmdir_lines)

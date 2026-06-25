@@ -81,8 +81,8 @@ def test_uninstall_plan_handles_windows_standalone_when_frozen(
 ) -> None:
     monkeypatch.setattr("netorium.services.uninstaller.sys.frozen", True, raising=False)
     env = {
-        "APPDATA": str(tmp_path / "Roaming"),
-        "LOCALAPPDATA": str(tmp_path / "Local"),
+        "APPDATA": r"C:\Users\roman\AppData\Roaming",
+        "LOCALAPPDATA": r"C:\Users\roman\AppData\Local",
     }
 
     plan = build_uninstall_plan(
@@ -101,6 +101,10 @@ def test_uninstall_plan_handles_windows_standalone_when_frozen(
     assert "timeout /t 2" in plan.package_command[3]
     assert "taskkill /IM netorium.exe /F" in plan.package_command[3]
     assert "Netorium" in plan.package_command[3]
+    assert r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\NUL" in plan.package_command[3]
+    assert r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\\" not in plan.package_command[3]
+    assert "Local/Netorium" not in plan.package_command[3]
+    assert "bin/netorium.exe" not in plan.package_command[3]
     assert "$entry='C:" in plan.package_command[3]
     assert "$entry=\"C:" not in plan.package_command[3]
     assert [target.label for target in plan.deferred_path_targets] == [
@@ -185,6 +189,9 @@ def test_windows_cleanup_detached_launches_script_without_start_parser(
     script_path = tmp_path / f"netorium-uninstall-{os.getpid()}.cmd"
     assert launched == [("cmd.exe", "/d", "/c", str(script_path))]
     assert "start" not in launched[0]
+    script = script_path.read_text(encoding="utf-8")
+    assert f"Wait-Process -Id {os.getpid()}" in script
+    assert "tasklist /FI" not in script
 
 
 def _write_config_and_data(tmp_path: Path) -> dict[str, str]:

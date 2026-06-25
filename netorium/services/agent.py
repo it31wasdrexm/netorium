@@ -26,7 +26,10 @@ from netorium.services.endpoint_policy import (
     apply_speed_policy,
 )
 from netorium.services.controller_service import reexec_windows_admin_if_needed
-from netorium.services.linux_service_runtime import resolve_linux_service_runtime
+from netorium.services.linux_service_runtime import (
+    LinuxServiceRuntime,
+    resolve_linux_service_runtime,
+)
 from netorium.services.windows_background import (
     build_schtasks_create_command,
     build_schtasks_delete_command,
@@ -345,7 +348,7 @@ def _find_netorium_executable() -> str:
 
 # ─── Linux / systemd ──────────────────────────────────────────────────────────
 
-def _systemd_unit_content(runtime) -> str:
+def _systemd_unit_content(runtime: LinuxServiceRuntime) -> str:
     environment_lines = "".join(
         f"        Environment={key}={value}\n"
         for key, value in runtime.environment
@@ -525,7 +528,7 @@ def _windows_service_action(action: str) -> str:
                 _run_service_cmd(build_sc_start_command(svc))
             except AgentError:
                 _run_service_cmd(build_schtasks_run_command(_WINDOWS_TASK_NAME))
-        return f"[Windows] Agent background task/service started."
+        return "[Windows] Agent background task/service started."
 
     if action == "stop":
         if nssm:
@@ -543,7 +546,7 @@ def _windows_service_action(action: str) -> str:
             _run_service_cmd_optional(build_schtasks_delete_command(_WINDOWS_TASK_NAME))
         _run_service_cmd_optional(build_sc_stop_command(svc))
         _run_service_cmd_optional(build_sc_delete_command(svc))
-        return f"[Windows] Agent background task/service removed."
+        return "[Windows] Agent background task/service removed."
 
     raise AgentError(f"Unknown service action: {action}")
 
@@ -883,21 +886,29 @@ def _controller_unreachable_error(enroll_url: str, controller_url: str) -> Agent
     parsed = urlparse(controller_url)
     host = parsed.hostname or "CONTROLLER_IP"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    health_url = f"{controller_url}/health"
     return AgentError(
         "Could not reach controller enrollment endpoint: connection timed out.\n"
         f"  URL: {enroll_url}\n"
         "  This is a network reachability problem, not a token problem.\n"
+        "  First prove this PC can reach the controller:\n"
+        f"    curl {health_url}\n"
+        f"    Test-NetConnection {host} -Port {port}\n"
+        "  If Test-NetConnection shows TcpTestSucceeded=False or PingSucceeded=False, "
+        "fix the LAN path before enrolling.\n"
         "  Check on the controller PC:\n"
         "    - controller is running (`netorium controller status`)\n"
         "    - background service is installed (`netorium controller install-service`)\n"
         "    - firewall allows inbound TCP on the controller port\n"
-        "      Windows: `netorium controller install-service` adds the rule automatically\n"
-        "      Linux: `sudo ufw allow 8765/tcp` or open the port in your firewall\n"
+        f"      Windows admin fallback:\n"
+        f"        netsh advfirewall firewall add rule name=\"Netorium Controller\" "
+        f"dir=in action=allow protocol=TCP localport={port} profile=any enable=yes\n"
+        f"        Set-NetConnectionProfile -InterfaceAlias \"Беспроводная сеть\" -NetworkCategory Private\n"
+        f"      Linux: `sudo ufw allow {port}/tcp` or open the port in your firewall\n"
         "    - controller listens on 0.0.0.0, not only 127.0.0.1\n"
-        "  On this PC, verify network access with:\n"
-        f"    curl {controller_url}/health\n"
-        f"    Test-NetConnection {host} -Port {port}\n"
-        "  If both fail, check that both PCs are on the same LAN/VPN and that guest Wi-Fi/client isolation is disabled."
+        "  If local controller health works but another PC cannot ping or open the port, "
+        "the usual cause is guest Wi-Fi, router AP/client isolation, VPN isolation, "
+        "or the wrong controller IP."
     )
 
 

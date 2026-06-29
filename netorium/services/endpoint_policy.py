@@ -190,9 +190,9 @@ def _run_powershell(script: str) -> None:
 
 def _hosts_domains(domain: str) -> list[str]:
     clean_domain = domain[2:] if domain.startswith("*.") else domain
-    domains = {clean_domain}
-    if not clean_domain.startswith("www."):
-        domains.add(f"www.{clean_domain}")
+    if clean_domain.startswith("www."):
+        clean_domain = clean_domain[4:]
+    domains = {clean_domain, f"www.{clean_domain}"}
     for prefix in ("m", "mobile", "music", "api", "cdn", "static", "i", "s", "login", "auth"):
         domains.add(f"{prefix}.{clean_domain}")
     return sorted(domains)
@@ -224,11 +224,17 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         "$SearchRoots = @("
         "$env:ProgramFiles, "
         "${env:ProgramFiles(x86)}, "
-        "$env:LOCALAPPDATA, "
-        "(Join-Path $env:ProgramFiles 'Steam'), "
-        "(Join-Path ${env:ProgramFiles(x86)} 'Steam'), "
-        "(Join-Path $env:LOCALAPPDATA 'Programs')"
-        ") | Where-Object { $_ -and (Test-Path $_) }; "
+        "$env:LOCALAPPDATA"
+        "); "
+        "$Drives = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 } | Select-Object -ExpandProperty DeviceID; "
+        "foreach ($Drive in $Drives) { "
+        "$SearchRoots += (Join-Path $Drive 'SteamLibrary\\steamapps\\common'); "
+        "$SearchRoots += (Join-Path $Drive 'Games'); "
+        "$SearchRoots += (Join-Path $Drive 'Program Files (x86)\\Steam\\steamapps\\common'); "
+        "$SearchRoots += (Join-Path $Drive 'Riot Games'); "
+        "$SearchRoots += (Join-Path $Drive 'Epic Games'); "
+        "} "
+        "$SearchRoots = $SearchRoots | Where-Object { $_ -and (Test-Path $_) }; "
         "$Matches = foreach ($Root in $SearchRoots) { "
         "Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 6 "
         "-ErrorAction SilentlyContinue }; "

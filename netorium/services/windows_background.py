@@ -70,6 +70,7 @@ def build_firewall_add_command(port: int, *, program: str | None = None) -> list
         f"localport={port}",
         "profile=any",
         "interfacetype=any",
+        "edge=yes",
         "enable=yes",
     ]
     if program:
@@ -92,6 +93,7 @@ def build_firewall_add_program_command(program: str) -> list[str]:
         "action=allow",
         f"program={program}",
         "profile=any",
+        "edge=yes",
         "enable=yes",
     ]
 

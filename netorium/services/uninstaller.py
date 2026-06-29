@@ -343,6 +343,7 @@ def _windows_cleanup_script_lines(
     executable: Path | None = None,
 ) -> list[str]:
     commands = [
+        "taskkill /IM nssm.exe /F >nul 2>nul",
         "taskkill /IM netorium.exe /F >nul 2>nul",
         "taskkill /IM netorium-agent.exe /F >nul 2>nul",
         "timeout /t 2 /nobreak >nul 2>nul",

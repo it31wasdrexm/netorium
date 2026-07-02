@@ -307,8 +307,7 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
             f"  Runs as: {runtime.service_user}\n"
             f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}\n"
             f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f\n"
-            f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}\n"
-            f"  Remove:  netorium controller uninstall-service"
+            f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}"
         )
 
     unit_dir = _systemd_user_dir()
@@ -326,11 +325,7 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
         f"User service installed and started: {unit_file}\n"
         f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
         f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
-        f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
-        f"  Remove:  netorium controller uninstall-service\n"
-        "\n"
-        "  Tip: Install a system-wide service that survives logout with:\n"
-        f"  {executable} controller install-service --system"
+        f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}"
     )
 
 
@@ -404,8 +399,7 @@ def _install_launchd(host: str, port: int) -> str:
         f"Launch Agent installed and started: {plist_file}\n"
         f"  Status:  launchctl list | grep netorium\n"
         f"  Logs:    tail -f /tmp/netorium-controller.log\n"
-        f"  Stop:    launchctl unload {plist_file}\n"
-        f"  Remove:  netorium controller uninstall-service"
+        f"  Stop:    launchctl unload {plist_file}"
     )
 
 
@@ -477,7 +471,7 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
     _run([nssm, "set", svc, "AppStdout", r"C:\ProgramData\Netorium\controller.log"])
     _run([nssm, "set", svc, "AppStderr", r"C:\ProgramData\Netorium\controller.err"])
     fw_warnings = _configure_windows_firewall(executable=executable, port=port)
-    _run([nssm, "start", svc])
+    _run_optional([nssm, "start", svc])
     parts = [
         f"Windows service '{svc}' installed and started with bundled NSSM.",
         f"  Listen:  http://{host}:{port}",
@@ -485,7 +479,6 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
         f"  Firewall: inbound TCP port {port} allowed on all profiles.",
         "  Logs:    C:\\ProgramData\\Netorium\\controller.log",
         f"  Stop:    sc stop {svc}",
-        "  Remove:  netorium controller uninstall-service",
     ]
     parts.extend(fw_warnings)
     return "\n".join(parts)
@@ -529,7 +522,6 @@ def _install_windows_sc(
         f"  Status:  sc query {service_name}",
         f"  Firewall: inbound TCP port {port} allowed on all profiles.",
         f"  Stop:    sc stop {service_name}",
-        "  Remove:  netorium controller uninstall-service",
     ]
     parts.extend(fw_warnings)
     return "\n".join(parts)
@@ -555,7 +547,6 @@ def _install_windows_task(executable: str, host: str, port: int) -> str:
         f"  Firewall: inbound TCP port {port} allowed on all profiles.",
         f"  Status:  schtasks /Query /TN {task}",
         "  Stop:    taskkill /IM netorium.exe /F",
-        "  Remove:  netorium controller uninstall-service",
     ]
     parts.extend(fw_warnings)
     return "\n".join(parts)

@@ -97,16 +97,17 @@ def test_uninstall_plan_handles_windows_standalone_when_frozen(
     assert plan.package_command_detached is True
     assert plan.path_targets == ()
     assert plan.package_command is not None
-    assert plan.package_command[:3] == ("cmd.exe", "/d", "/c")
-    assert "timeout /t 5" in plan.package_command[3]
-    assert "taskkill /IM netorium.exe /F" in plan.package_command[3]
-    assert "Netorium" in plan.package_command[3]
-    assert r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\NUL" in plan.package_command[3]
-    assert r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\\" not in plan.package_command[3]
-    assert "Local/Netorium" not in plan.package_command[3]
-    assert "bin/netorium.exe" not in plan.package_command[3]
-    assert "$entry='C:" in plan.package_command[3]
-    assert "$entry=\"C:" not in plan.package_command[3]
+    assert plan.package_command[0] == "windows-batch-cleanup"
+    script_lines = plan.package_command[1:]
+    assert any("timeout /t 5" in line for line in script_lines)
+    assert any("taskkill /IM netorium.exe /F" in line for line in script_lines)
+    assert any("Netorium" in line for line in script_lines)
+    assert any(r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\NUL" in line for line in script_lines)
+    assert not any(r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\\" in line for line in script_lines)
+    assert not any("Local/Netorium" in line for line in script_lines)
+    assert not any("bin/netorium.exe" in line for line in script_lines)
+    assert any("$entry='C:" in line for line in script_lines)
+    assert not any("$entry=\"C:" in line for line in script_lines)
     assert [target.label for target in plan.deferred_path_targets] == [
         "Configuration directory",
         "Application data directory",
@@ -133,7 +134,7 @@ def test_uninstall_plan_handles_windows_local_venv_install(tmp_path: Path) -> No
     assert plan.package_command_detached is True
     assert plan.path_targets == ()
     assert plan.package_command is not None
-    assert plan.package_command[:3] == ("cmd.exe", "/d", "/c")
+    assert plan.package_command[0] == "windows-batch-cleanup"
     assert [target.label for target in plan.deferred_path_targets] == [
         "Windows virtual environment",
         "Windows launcher directory",
@@ -182,7 +183,7 @@ def test_windows_cleanup_detached_launches_script_without_start_parser(
     monkeypatch.setattr(uninstaller_service.subprocess, "Popen", FakePopen)
 
     exit_code = uninstaller_service._run_windows_cleanup_detached(
-        ("cmd.exe", "/d", "/c", "echo cleanup")
+        ("windows-batch-cleanup", "echo cleanup")
     )
 
     assert exit_code == 0

@@ -203,6 +203,8 @@ def execute_uninstall_plan(
 
 
 def format_command(command: tuple[str, ...]) -> str:
+    if command and command[0] == "windows-batch-cleanup":
+        return "Windows cleanup script"
     return " ".join(_quote_display_part(part) for part in command)
 
 
@@ -333,7 +335,7 @@ def _windows_deferred_remove_command(
     if not cleanup_lines:
         return None
 
-    return ("cmd.exe", "/d", "/c", " & ".join(cleanup_lines))
+    return ("windows-batch-cleanup", *cleanup_lines)
 
 
 def _windows_cleanup_script_lines(
@@ -571,8 +573,9 @@ def _run_command_detached(args: tuple[str, ...]) -> int:
 
 def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
     launch_args: tuple[str, ...]
-    if len(args) >= 4 and args[0] == "cmd.exe" and args[1] == "/d" and args[2] == "/c":
-        cleanup_body = args[3]
+    if len(args) >= 1 and args[0] == "windows-batch-cleanup":
+        cleanup_lines = args[1:]
+        cleanup_body = "\n".join(cleanup_lines)
         parent_pid = os.getpid()
         script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.cmd"
 
@@ -600,7 +603,7 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
             'if %RETRY% GEQ 3 goto RETRY_DONE\n'
         )
         # Check if the main exe still exists; if not we are done
-        if args[3].find('netorium.exe') != -1:
+        if '\n'.join(cleanup_lines).find('netorium.exe') != -1:
             retry_block += (
                 'timeout /t 3 /nobreak >nul 2>nul\n'
                 'goto RETRY_LOOP\n'

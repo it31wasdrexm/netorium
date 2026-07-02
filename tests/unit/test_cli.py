@@ -72,9 +72,8 @@ def test_interactive_shell_runs_commands_without_prefix(monkeypatch: pytest.Monk
     result = runner.invoke(app, [], input="version\nexit\n")
 
     assert result.exit_code == 0
-    assert "Quick Commands" in result.output
-    assert "install-service" in result.output
-    assert "update check" in result.output
+    assert "zero-trust network control" in result.output
+    assert "Type help to see all commands" in result.output
     assert "netorium>" in result.output
     assert f"{APP_NAME} {get_version()}" in result.output
     assert "Leaving Netorium." in result.output
@@ -124,8 +123,8 @@ def test_interactive_shell_shows_startup_update_notice(
     result = runner.invoke(app, [], input="exit\n")
 
     assert result.exit_code == 0
-    assert "Update Available" in result.output
-    assert "0.1.0 ->" in result.output
+    assert "Update available" in result.output
+    assert "0.1.0" in result.output
     assert "0.2.0" in result.output
     assert "curl -fsSL https://example.test/install.sh | bash" in result.output
 

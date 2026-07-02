@@ -266,7 +266,7 @@ def run_agent_loop(
     state_path: str | Path | None = None,
     *,
     client: HttpClient | None = None,
-    interval_seconds: float = 15.0,
+    interval_seconds: float = 5.0,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> None:
     """Run the agent heartbeat loop forever (used by the background service)."""
@@ -386,8 +386,7 @@ def _systemd_action(action: str) -> str:
             f"[systemd --user] Agent service installed: {unit_file}\n"
             f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
             f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
-            f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
-            f"  Remove:  netorium agent service uninstall"
+            f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}"
         )
 
     if action == "start":
@@ -450,8 +449,7 @@ def _launchd_action(action: str) -> str:
         return (
             f"[launchd] Agent Launch Agent installed: {plist_file}\n"
             f"  Status:  launchctl list | grep netorium\n"
-            f"  Logs:    tail -f /tmp/netorium-agent.log\n"
-            f"  Remove:  netorium agent service uninstall"
+            f"  Logs:    tail -f /tmp/netorium-agent.log"
         )
     if action == "start":
         _run_service_cmd(["launchctl", "start", _LAUNCHD_LABEL])
@@ -487,12 +485,11 @@ def _windows_service_action(action: str) -> str:
                               r"C:\ProgramData\Netorium\agent.log"])
             _run_service_cmd([nssm, "set", svc, "AppStderr",
                               r"C:\ProgramData\Netorium\agent.err"])
-            _run_service_cmd([nssm, "start", svc])
+            _run_service_cmd_optional([nssm, "start", svc])
             return (
                 f"[Windows/NSSM] Agent service '{svc}' installed and started.\n"
                 f"  Status:  sc query {svc}\n"
-                f"  Logs:    C:\\ProgramData\\Netorium\\agent.log\n"
-                f"  Remove:  netorium agent service uninstall"
+                f"  Logs:    C:\\ProgramData\\Netorium\\agent.log"
             )
 
         try:
@@ -515,8 +512,7 @@ def _windows_service_action(action: str) -> str:
             return (
                 f"[Windows] Agent scheduled task '{task}' installed and started.\n"
                 f"  Runs at logon and keeps the agent connected in the background.\n"
-                f"  Status:  schtasks /Query /TN {task}\n"
-                f"  Remove:  netorium agent service uninstall\n"
+                f"  Status:  schtasks /Query /TN {_WINDOWS_TASK_NAME}\n"
                 "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
             )
 

@@ -184,43 +184,29 @@ def _run_interactive_sudo(args: list[str]) -> None:
         error_console.print(f"[red]sudo exited with code {result.returncode}[/]")
 
 
+from rich.align import Align
+
 def _render_interactive_header() -> None:
     console.print()
-    console.print(render_logo_panel(subtitle="local controller and endpoint policies"))
-    overview = render_info_panel(
-        "Environment",
-        (
-            ("Version", get_version()),
-            ("Platform", platform.system() or "unknown"),
-            ("Config", str(default_config_path())),
-        ),
-        expand=False,
+    console.print(render_logo_panel(subtitle="zero-trust network control", border_style="magenta"))
+    
+    env_text = Text.assemble(
+        (" ✦ ", "bright_magenta"),
+        ("v", "bright_black"), (get_version(), "bold white"),
+        (" • ", "bright_black"), (platform.system() or "unknown", "cyan"),
+        (" • ", "bright_black"), (str(default_config_path()), "bright_black"),
     )
-    console.print(overview)
-
-    shortcuts = Table(
-        title="Quick Commands",
-        box=box.ROUNDED,
-        show_header=True,
-        header_style="bold bright_cyan",
-        border_style="bright_black",
+    console.print(Align.center(env_text))
+    console.print()
+    
+    hint = Text.assemble(
+        ("Type ", "bright_black"),
+        ("help", "bold bright_cyan"),
+        (" to see all commands, or ", "bright_black"),
+        ("exit", "bold bright_cyan"),
+        (" to leave.", "bright_black")
     )
-    shortcuts.add_column("Task", style="cyan", no_wrap=True)
-    shortcuts.add_column("Command", style="white")
-    shortcuts.add_column("Use", style=MUTED_STYLE)
-    shortcuts.add_row(
-        "Controller",
-        "controller status | controller install-service",
-        "run in background",
-    )
-    shortcuts.add_row("Updates", "update check | update install", "check or install latest")
-    shortcuts.add_row(
-        "Cleanup",
-        "uninstall | uninstall --remove-data",
-        "remove CLI cleanly",
-    )
-    shortcuts.add_row("Help", "help | help controller | exit", "navigate commands")
-    console.print(shortcuts)
+    console.print(Align.center(hint))
     console.print()
 
 
@@ -235,17 +221,29 @@ def _render_startup_update_notice() -> None:
 def _startup_update_panel(notice: StartupUpdateNotice) -> Panel:
     platform_info = notice.platform
     body = Table.grid(padding=(0, 2))
-    body.add_column(style="yellow", justify="right")
+    body.add_column(style="magenta", justify="right")
     body.add_column()
-    body.add_row(
-        "Update",
-        f"{notice.info.current_version} -> [bold bright_yellow]{notice.info.latest_version}[/]",
-    )
+    
     body.add_row("Platform", platform_info.platform_name)
-    body.add_row("Install", f"[bold]{platform_info.install_command}[/]")
-    body.add_row("Standalone", platform_info.standalone_command)
-    body.add_row("Release", notice.info.release_url)
-    return render_notice_panel("Update Available", body, border_style="yellow")
+    body.add_row("Install", f"[bold bright_cyan]{platform_info.install_command}[/]")
+    if platform_info.standalone_command:
+        body.add_row("Standalone", f"[bright_black]{platform_info.standalone_command}[/]")
+    body.add_row("Release", f"[underline blue]{notice.info.release_url}[/]")
+    
+    title = Text.assemble(
+        ("✨ ", "yellow"),
+        ("Update available: ", "bold white"),
+        (notice.info.current_version, "bright_black"),
+        (" → ", "bright_black"),
+        (notice.info.latest_version, "bold bright_green")
+    )
+    
+    return Panel(
+        Align.center(body),
+        title=title,
+        border_style="magenta",
+        padding=(1, 2),
+    )
 
 
 @app.callback(invoke_without_command=True)

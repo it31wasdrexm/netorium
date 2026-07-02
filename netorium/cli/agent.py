@@ -79,7 +79,7 @@ def enroll(
     else:
         console.print(
             "Background service was not installed automatically. "
-            "Run: netorium agent service install"
+            "Make sure you have administrator/root privileges."
         )
 
 
@@ -131,47 +131,11 @@ def run_loop(
     interval: Annotated[
         float,
         typer.Option("--interval", help="Heartbeat interval in seconds."),
-    ] = 15.0,
+    ] = 5.0,
 ) -> None:
     """Run the agent heartbeat loop continuously (used by background service)."""
     try:
         run_agent_loop(interval_seconds=interval)
-    except AgentError as exc:
-        _fail(exc)
-
-
-@service_app.command("install")
-def service_install() -> None:
-    """Install the agent as a system background service (start at boot)."""
-    try:
-        console.print(service_action("install"))
-    except AgentError as exc:
-        _fail(exc)
-
-
-@service_app.command("uninstall")
-def service_uninstall() -> None:
-    """Uninstall the agent background service."""
-    try:
-        console.print(service_action("uninstall"))
-    except AgentError as exc:
-        _fail(exc)
-
-
-@service_app.command("start")
-def service_start() -> None:
-    """Start the agent background service."""
-    try:
-        console.print(service_action("start"))
-    except AgentError as exc:
-        _fail(exc)
-
-
-@service_app.command("stop")
-def service_stop() -> None:
-    """Stop the agent background service."""
-    try:
-        console.print(service_action("stop"))
     except AgentError as exc:
         _fail(exc)
 
@@ -183,7 +147,6 @@ def update_check() -> None:
     console.print("Use `netorium update show` for current release and installer guidance.")
 
 
-app.add_typer(service_app, name="service")
 app.add_typer(update_app, name="update")
 
 

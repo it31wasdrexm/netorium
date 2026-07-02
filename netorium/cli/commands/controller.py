@@ -96,7 +96,7 @@ def init(
     else:
         console.print(
             "Background service was not installed automatically. "
-            "Run: netorium controller install-service"
+            "Make sure you have administrator/root privileges."
         )
 
 
@@ -603,42 +603,7 @@ def policy_clear_speed(
     _render_agent_commands(result)
 
 
-@controller_app.command("install-service")
-def install_service(
-    host: Annotated[
-        str,
-        typer.Option("--host", help="Controller listen host."),
-    ] = DEFAULT_CONTROLLER_HOST,
-    port: Annotated[
-        int,
-        typer.Option("--port", help="Controller listen port."),
-    ] = DEFAULT_CONTROLLER_PORT,
-    system: Annotated[
-        bool,
-        typer.Option(
-            "--system",
-            help="Install a system-wide Linux service (re-execs with sudo when needed).",
-        ),
-    ] = False,
-) -> None:
-    """Install the controller as a system background service (systemd on Linux, Windows Service on Windows)."""
-    try:
-        result = install_controller_service(host=host, port=port, system=system)
-    except (ConfigError, ControllerServiceError) as exc:
-        _fail(exc)
 
-    console.print(result)
-
-
-@controller_app.command("uninstall-service")
-def uninstall_service() -> None:
-    """Uninstall the controller system background service."""
-    try:
-        result = uninstall_controller_service()
-    except (ConfigError, ControllerServiceError) as exc:
-        _fail(exc)
-
-    console.print(result)
 
 
 agent_app.add_typer(agent_command_app, name="command")

@@ -22,7 +22,6 @@ def test_agent_help_shows_commands() -> None:
     assert "enroll" in result.output
     assert "status" in result.output
     assert "run" in result.output
-    assert "service" in result.output
     assert "update" in result.output
 
 
@@ -156,16 +155,9 @@ def test_agent_enroll_timeout_explains_lan_diagnostics(monkeypatch) -> None:
     assert "client isolation" in result.output
 
 
-def test_agent_service_and_update_commands(monkeypatch) -> None:
-    import netorium.cli.agent as agent_cli_module
-
-    monkeypatch.setattr(agent_cli_module, "service_action", lambda action: f"Service {action} OK")
-
-    service_result = runner.invoke(app, ["service", "install"])
+def test_agent_update_command(monkeypatch) -> None:
     update_result = runner.invoke(app, ["update", "check"])
 
-    assert service_result.exit_code == 0
-    assert "Service install OK" in service_result.output
     assert update_result.exit_code == 0
     assert "Netorium Agent" in update_result.output
     assert "netorium update show" in update_result.output

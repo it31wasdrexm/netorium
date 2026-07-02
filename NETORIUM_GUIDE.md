@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📘 Netorium Complete Guide
+#  Netorium Complete Guide
 
 **The Ultimate Building-level Network Access Control CLI**
 
@@ -8,7 +8,7 @@
 
 ---
 
-## 📖 Introduction
+##  Introduction
 
 **Netorium CLI** is a cross-platform, open-source Python tool designed to simplify network access control. Instead of dealing with individual IPs and scattered firewall rules, Netorium lets you group devices by logical zones such as `3rd floor`, `accounting`, `server room`, `guests`, or `classroom`.
 
@@ -23,7 +23,7 @@
 
 ---
 
-## 🏗️ Architecture & Deployment
+##  Architecture & Deployment
 
 Netorium supports flexible deployment modes to fit any infrastructure:
 
@@ -48,7 +48,7 @@ netorium-agent service install
 
 ---
 
-## 🚀 Installation Instructions
+##  Installation Instructions
 
 ### One-line Install for Windows PowerShell
 ```powershell
@@ -69,7 +69,7 @@ python -m pip install netorium-cli
 
 ---
 
-## 🛠️ Core Commands Quick Reference
+##  Core Commands Quick Reference
 
 ### Zone Management
 ```bash
@@ -116,7 +116,7 @@ Run `netorium config init` to create a default configuration, and `netorium conf
 
 ---
 
-## 🔄 Updates
+##  Updates
 
 Netorium makes keeping your tools up-to-date effortless:
 ```bash

@@ -74,6 +74,16 @@ def apply_site_policy(
     except OSError as exc:
         raise EndpointPolicyError(f"Could not read hosts file {active_hosts_path}: {exc}") from exc
 
+    real_ips = set()
+    if action == "block":
+        import socket
+        for d in domains:
+            try:
+                for res in socket.getaddrinfo(d, 443, proto=socket.IPPROTO_TCP):
+                    real_ips.add(res[4][0])
+            except socket.error:
+                pass
+
     updated = _remove_marked_block(current, start_marker, end_marker)
     if action == "block":
         lines = [start_marker, f"# Reason: {reason}"]
@@ -98,22 +108,26 @@ def apply_site_policy(
         "ipconfig /flushdns | Out-Null"
     )
     if action == "block":
-        _run_powershell(
-            "New-NetFirewallRule -DisplayName 'Netorium Block QUIC' -Direction Outbound -Protocol UDP -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue; "
-            f"$ips = Resolve-DnsName -Name '{domain}' -ErrorAction SilentlyContinue | Where-Object {{ $_.Type -eq 'A' -or $_.Type -eq 'AAAA' }} | Select-Object -ExpandProperty IPAddress; "
-            "if ($ips) { "
-            f"New-NetFirewallRule -DisplayName 'Netorium Site {domain} IPs' -Direction Outbound -RemoteAddress $ips -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null; "
-            "} "
-            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Force | Out-Null }; "
+        ps_lines = [
+            "New-NetFirewallRule -DisplayName 'Netorium Block QUIC' -Direction Outbound -Protocol UDP -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null"
+        ]
+        if real_ips:
+            ips_str = ",".join(f"'{ip}'" for ip in real_ips)
+            ps_lines.append(
+                f"New-NetFirewallRule -DisplayName 'Netorium Site {domain} IPs' -Direction Outbound -RemoteAddress {ips_str} -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null"
+            )
+        ps_lines.extend([
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Force | Out-Null }",
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Force | Out-Null }; "
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue; "
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Force | Out-Null }; "
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Name 'DNSOverHTTPS' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; "
-            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Force | Out-Null }; "
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Name 'DNSOverHTTPS' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Force | Out-Null }",
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue"
-        )
+        ])
+        _run_powershell("; ".join(ps_lines))
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
 
 
@@ -303,9 +317,14 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         "$SearchRoots += (Join-Path $Drive 'Riot Games'); "
         "$SearchRoots += (Join-Path $Drive 'Epic Games'); "
         "} "
-        "$SearchRoots = $SearchRoots | Where-Object { $_ -and (Test-Path $_) }; "
+        "$regPaths2 = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'); "
+        "foreach ($rp in $regPaths2) { "
+        "  $items = Get-ItemProperty $rp -ErrorAction SilentlyContinue; "
+        "  foreach ($item in $items) { if ($item.InstallLocation) { $SearchRoots += $item.InstallLocation } } "
+        "} "
+        "$SearchRoots = $SearchRoots | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique; "
         "foreach ($Root in $SearchRoots) { "
-        "  $found = Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 8 -ErrorAction SilentlyContinue; "
+        "  $found = Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 5 -ErrorAction SilentlyContinue; "
         "  if ($found) { $Matches += $found | Select-Object -ExpandProperty FullName -Unique; break; } "
         "} "
         "} "

@@ -82,7 +82,9 @@ def apply_site_policy(
         lines.extend(f"::1 {blocked_domain}" for blocked_domain in domains)
         lines.append(end_marker)
         updated = updated.rstrip() + "\n" + "\n".join(lines) + "\n"
-    elif action != "unblock":
+    elif action == "unblock":
+        _run_powershell(f"Remove-NetFirewallRule -DisplayName 'Netorium Site {domain} IPs' -ErrorAction SilentlyContinue")
+    else:
         raise EndpointPolicyError("Site policy action must be block or unblock.")
 
     try:
@@ -98,6 +100,10 @@ def apply_site_policy(
     if action == "block":
         _run_powershell(
             "New-NetFirewallRule -DisplayName 'Netorium Block QUIC' -Direction Outbound -Protocol UDP -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue; "
+            f"$ips = Resolve-DnsName -Name '{domain}' -ErrorAction SilentlyContinue | Where-Object {{ $_.Type -eq 'A' -or $_.Type -eq 'AAAA' }} | Select-Object -ExpandProperty IPAddress; "
+            "if ($ips) { "
+            f"New-NetFirewallRule -DisplayName 'Netorium Site {domain} IPs' -Direction Outbound -RemoteAddress $ips -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null; "
+            "} "
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Force | Out-Null }; "
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Force | Out-Null }; "
@@ -272,9 +278,13 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         f"$Name = {_ps_quote(rule_name)}; "
         f"$ExeName = {_ps_quote(executable)}; "
         "$Matches = @(); "
-        "$running = Get-Process | Where-Object { $_.ProcessName -eq $ExeName.Replace('.exe','') } | Select-Object -ExpandProperty Path -Unique -ErrorAction SilentlyContinue; "
+        "$running = Get-CimInstance Win32_Process -Filter \"Name='$ExeName'\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ExecutablePath | Select-Object -Unique -ErrorAction SilentlyContinue; "
         "if ($running) { $Matches += $running } "
         "else { "
+        "$running = Get-Process | Where-Object { $_.ProcessName -eq $ExeName.Replace('.exe','') } | Select-Object -ExpandProperty Path -Unique -ErrorAction SilentlyContinue; "
+        "if ($running) { $Matches += $running } "
+        "} "
+        "if ($Matches.Count -eq 0) { "
         "$regPaths = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths', 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths'); "
         "foreach ($rp in $regPaths) { "
         "  $key = Join-Path $rp $ExeName; "
@@ -295,9 +305,8 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         "} "
         "$SearchRoots = $SearchRoots | Where-Object { $_ -and (Test-Path $_) }; "
         "foreach ($Root in $SearchRoots) { "
-        "  $found = Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 4 -ErrorAction SilentlyContinue; "
+        "  $found = Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 8 -ErrorAction SilentlyContinue; "
         "  if ($found) { $Matches += $found | Select-Object -ExpandProperty FullName -Unique; break; } "
-        "} "
         "} "
         "} "
         "$Matches = @($Matches | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique); "

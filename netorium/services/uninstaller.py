@@ -343,10 +343,12 @@ def _windows_cleanup_script_lines(
     executable: Path | None = None,
 ) -> list[str]:
     commands = [
+        "sc stop NetoriumController >nul 2>nul",
+        "sc stop NetoriumAgent >nul 2>nul",
         "taskkill /IM nssm.exe /F >nul 2>nul",
         "taskkill /IM netorium.exe /F >nul 2>nul",
         "taskkill /IM netorium-agent.exe /F >nul 2>nul",
-        "timeout /t 2 /nobreak >nul 2>nul",
+        "timeout /t 5 /nobreak >nul 2>nul",
     ]
 
     removal_paths: list[Path] = []
@@ -573,15 +575,48 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
         cleanup_body = args[3]
         parent_pid = os.getpid()
         script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.cmd"
+
+        # For frozen executables (PyInstaller), the inner Python PID differs
+        # from the outer netorium.exe wrapper. We must wait for both and also
+        # wait by image name as a fallback.
+        wait_lines = [
+            (
+                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+                f"\"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue; "
+                "Start-Sleep -Seconds 2; "
+                "$p = Get-Process -Name netorium -ErrorAction SilentlyContinue; "
+                "if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; "
+                "Start-Sleep -Seconds 3 }\" "
+                ">nul 2>nul"
+            ),
+        ]
+
+        # Retry deletion up to 3 times with delays to handle lingering locks
+        retry_block = (
+            'set "RETRY=0"\n'
+            ':RETRY_LOOP\n'
+            f'{cleanup_body}\n'
+            'set /a RETRY+=1\n'
+            'if %RETRY% GEQ 3 goto RETRY_DONE\n'
+        )
+        # Check if the main exe still exists; if not we are done
+        if args[3].find('netorium.exe') != -1:
+            retry_block += (
+                'timeout /t 3 /nobreak >nul 2>nul\n'
+                'goto RETRY_LOOP\n'
+            )
+        else:
+            retry_block += (
+                'timeout /t 3 /nobreak >nul 2>nul\n'
+                'goto RETRY_LOOP\n'
+            )
+        retry_block += ':RETRY_DONE'
+
         script_lines = [
             "@echo off",
             "setlocal",
-            (
-                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-                f"\"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue\" "
-                ">nul 2>nul"
-            ),
-            cleanup_body,
+            *wait_lines,
+            retry_block,
             'del /f /q "%~f0" >nul 2>nul',
         ]
         script_path.write_text("\r\n".join(script_lines), encoding="utf-8")

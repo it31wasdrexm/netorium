@@ -18,7 +18,9 @@ def run_text(
         list(cmd),
         check=check,
         capture_output=capture_output,
-        **SUBPROCESS_TEXT_KWARGS,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -27,5 +29,7 @@ def run_text_optional(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
         list(cmd),
         check=False,
         capture_output=True,
-        **SUBPROCESS_TEXT_KWARGS,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )

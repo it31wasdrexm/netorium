@@ -368,6 +368,7 @@ function Install-StandaloneRelease {
     $ResolvedBinDir = (Resolve-Path $BinDir).Path
     $TargetPath = Join-Path $ResolvedBinDir "netorium.exe"
     $TempPath = "$TargetPath.download"
+    $OldPath = "$TargetPath.old"
     $DownloadUrl = Get-StandaloneDownloadUrl
 
     Invoke-NetoriumDownload -Url $DownloadUrl -Destination $TempPath -Label "Downloading Netorium CLI"
@@ -375,7 +376,57 @@ function Install-StandaloneRelease {
         Write-Error "Downloaded Netorium standalone binary is empty: $DownloadUrl"
         exit 1
     }
-    Move-Item -Path $TempPath -Destination $TargetPath -Force
+
+    # Stop running netorium processes/services before replacing the binary
+    if (Test-Path $TargetPath) {
+        sc.exe stop NetoriumController *> $null
+        sc.exe stop NetoriumAgent *> $null
+        Stop-Process -Name "nssm" -Force -ErrorAction SilentlyContinue
+        Stop-Process -Name "netorium" -Force -ErrorAction SilentlyContinue
+        Stop-Process -Name "netorium-agent" -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+
+        # Try to remove old backup if it exists
+        Remove-Item -Path $OldPath -Force -ErrorAction SilentlyContinue
+
+        # Try to rename the current file out of the way first
+        try {
+            Rename-Item -Path $TargetPath -NewName "netorium.exe.old" -Force -ErrorAction Stop
+        } catch {
+            # If rename fails, try direct removal with retries
+            for ($i = 0; $i -lt 5; $i++) {
+                try {
+                    Remove-Item -Path $TargetPath -Force -ErrorAction Stop
+                    break
+                } catch {
+                    if ($i -eq 4) {
+                        Write-NetoriumWarn "Could not remove old binary after 5 attempts. Retrying move..."
+                    }
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+    }
+
+    # Move new binary into place with retry logic
+    $moveSuccess = $false
+    for ($i = 0; $i -lt 5; $i++) {
+        try {
+            Move-Item -Path $TempPath -Destination $TargetPath -Force -ErrorAction Stop
+            $moveSuccess = $true
+            break
+        } catch {
+            if ($i -eq 4) {
+                Write-Error "Could not install Netorium binary after 5 attempts: $_"
+                exit 1
+            }
+            Start-Sleep -Seconds 2
+        }
+    }
+
+    # Clean up old backup
+    Remove-Item -Path $OldPath -Force -ErrorAction SilentlyContinue
+
     Install-BundledNssmIfMissing -TargetDir $ResolvedBinDir
 
     $VersionOutput = & $TargetPath version 2>$null

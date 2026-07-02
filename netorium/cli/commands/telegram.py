@@ -5,7 +5,6 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
 
 from netorium.core.settings import ConfigError, load_settings, default_config_path
 from netorium.services.telegram_client import TelegramError

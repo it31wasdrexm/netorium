@@ -98,7 +98,7 @@ def test_uninstall_plan_handles_windows_standalone_when_frozen(
     assert plan.path_targets == ()
     assert plan.package_command is not None
     assert plan.package_command[:3] == ("cmd.exe", "/d", "/c")
-    assert "timeout /t 2" in plan.package_command[3]
+    assert "timeout /t 5" in plan.package_command[3]
     assert "taskkill /IM netorium.exe /F" in plan.package_command[3]
     assert "Netorium" in plan.package_command[3]
     assert r"C:\Users\roman\AppData\Local\Netorium\bin\netorium.exe\NUL" in plan.package_command[3]

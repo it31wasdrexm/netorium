@@ -156,7 +156,7 @@ def reexec_system_install_if_needed(
 
 def _is_windows_admin() -> bool:
     try:
-        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        return bool(ctypes.windll.shell32.IsUserAnAdmin() != 0)  # type: ignore[attr-defined]
     except AttributeError:
         return False
 
@@ -171,7 +171,7 @@ def reexec_windows_admin_if_needed(args: list[str]) -> None:
     # Create the command string for the argument
     args_str = " ".join(f'"{a}"' if " " in a else a for a in args)
     try:
-        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, args_str, None, 1)
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, args_str, None, 1)  # type: ignore[attr-defined]
         if result <= 32:
             raise ControllerServiceError("Failed to request Administrator privileges.")
         # Successfully elevated, exit current non-elevated process
@@ -483,9 +483,9 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
         f"  Listen:  http://{host}:{port}",
         f"  Status:  sc query {svc}",
         f"  Firewall: inbound TCP port {port} allowed on all profiles.",
-        f"  Logs:    C:\\ProgramData\\Netorium\\controller.log",
+        "  Logs:    C:\\ProgramData\\Netorium\\controller.log",
         f"  Stop:    sc stop {svc}",
-        f"  Remove:  netorium controller uninstall-service",
+        "  Remove:  netorium controller uninstall-service",
     ]
     parts.extend(fw_warnings)
     return "\n".join(parts)
@@ -529,7 +529,7 @@ def _install_windows_sc(
         f"  Status:  sc query {service_name}",
         f"  Firewall: inbound TCP port {port} allowed on all profiles.",
         f"  Stop:    sc stop {service_name}",
-        f"  Remove:  netorium controller uninstall-service",
+        "  Remove:  netorium controller uninstall-service",
     ]
     parts.extend(fw_warnings)
     return "\n".join(parts)
@@ -551,11 +551,11 @@ def _install_windows_task(executable: str, host: str, port: int) -> str:
     parts = [
         f"Windows scheduled task '{task}' installed and started.",
         f"  Listen:  http://{host}:{port}",
-        f"  Runs at logon and starts the controller in the background.",
+        "  Runs at logon and starts the controller in the background.",
         f"  Firewall: inbound TCP port {port} allowed on all profiles.",
         f"  Status:  schtasks /Query /TN {task}",
-        f"  Stop:    taskkill /IM netorium.exe /F",
-        f"  Remove:  netorium controller uninstall-service",
+        "  Stop:    taskkill /IM netorium.exe /F",
+        "  Remove:  netorium controller uninstall-service",
     ]
     parts.extend(fw_warnings)
     return "\n".join(parts)

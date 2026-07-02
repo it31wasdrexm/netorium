@@ -192,7 +192,50 @@ function Install-UserCommand {
 
     $ResolvedBinDir = (New-Item -ItemType Directory -Force -Path $BinDir).FullName
     $InstalledPath = Join-Path $ResolvedBinDir "netorium.exe"
-    Copy-Item $SourcePath $InstalledPath -Force
+
+    # Stop any running netorium processes before copying
+    if (Test-Path $InstalledPath) {
+        sc.exe stop NetoriumController *> $null
+        sc.exe stop NetoriumAgent *> $null
+        Stop-Process -Name "nssm" -Force -ErrorAction SilentlyContinue
+        Stop-Process -Name "netorium" -Force -ErrorAction SilentlyContinue
+        Stop-Process -Name "netorium-agent" -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+
+    $OldPath = "$InstalledPath.old"
+    if (Test-Path $InstalledPath) {
+        Remove-Item -Path $OldPath -Force -ErrorAction SilentlyContinue
+        try {
+            Rename-Item -Path $InstalledPath -NewName "netorium.exe.old" -Force -ErrorAction Stop
+        } catch {
+            for ($i = 0; $i -lt 5; $i++) {
+                try {
+                    Remove-Item -Path $InstalledPath -Force -ErrorAction Stop
+                    break
+                } catch {
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+    }
+
+    $copySuccess = $false
+    for ($i = 0; $i -lt 5; $i++) {
+        try {
+            Copy-Item $SourcePath $InstalledPath -Force -ErrorAction Stop
+            $copySuccess = $true
+            break
+        } catch {
+            if ($i -eq 4) {
+                Write-Warning "Could not copy binary after 5 attempts: $_"
+                Write-Warning "You may need to close all netorium.exe processes and retry."
+            }
+            Start-Sleep -Seconds 2
+        }
+    }
+    Remove-Item -Path $OldPath -Force -ErrorAction SilentlyContinue
+
     Install-BundledNssm -TargetDir $ResolvedBinDir
     Add-UserPathEntry -PathEntry $ResolvedBinDir
 

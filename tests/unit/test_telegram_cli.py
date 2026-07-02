@@ -5,9 +5,7 @@ import tomllib
 from typer.testing import CliRunner
 
 from netorium.cli.app import app
-from netorium.cli.commands import telegram as telegram_command
 from netorium.core.settings import CONFIG_TEMPLATE
-from netorium.services.telegram_client import TelegramError
 from tests.unit.path_helpers import isolated_config_dir, isolated_config_path, isolated_user_env
 
 runner = CliRunner()

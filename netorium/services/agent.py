@@ -149,7 +149,7 @@ def enroll_agent(
     payload = _read_json_object(response)
     agent_id = _read_required_string(payload, "agent_id")
     device_token = _read_required_string(payload, "device_token")
-    zone = _read_required_string(payload, "zone")
+    zone = _read_string_allow_empty(payload, "zone")
     enrolled_at = _read_required_string(payload, "enrolled_at")
 
     path = Path(state_path).expanduser() if state_path is not None else default_agent_state_path()
@@ -183,7 +183,7 @@ def load_agent_state(state_path: str | Path | None = None) -> AgentState:
         controller_url=_read_required_string(data, "controller_url"),
         agent_id=_read_required_string(data, "agent_id"),
         hostname=_read_required_string(data, "hostname"),
-        zone=_read_required_string(data, "zone"),
+        zone=_read_string_allow_empty(data, "zone"),
         device_token=_read_required_string(data, "device_token"),
         enrolled_at=_read_required_string(data, "enrolled_at"),
         state_path=path,
@@ -944,6 +944,16 @@ def _read_required_string(payload: dict[str, Any], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise AgentError(f"Controller enrollment response is missing `{key}`.")
+    return value.strip()
+
+
+def _read_string_allow_empty(payload: dict[str, Any], key: str) -> str:
+    """Read a string field that may be legitimately empty (e.g. zone)."""
+    value = payload.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise AgentError(f"Controller enrollment response has invalid `{key}`.")
     return value.strip()
 
 

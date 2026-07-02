@@ -512,8 +512,7 @@ def _windows_service_action(action: str) -> str:
             return (
                 f"[Windows] Agent scheduled task '{task}' installed and started.\n"
                 f"  Runs at logon and keeps the agent connected in the background.\n"
-                f"  Status:  schtasks /Query /TN {_WINDOWS_TASK_NAME}\n"
-                "  Tip: Install NSSM (https://nssm.cc) for a true Windows service with logs."
+                f"  Status:  schtasks /Query /TN {_WINDOWS_TASK_NAME}"
             )
 
     if action == "start":
@@ -844,9 +843,6 @@ def _install_windows_agent_sc(
         f"[Windows/sc.exe] Agent service '{service_name}' installed and started.\n"
         f"  Status:  sc query {service_name}\n"
         f"  Remove:  netorium agent service uninstall\n"
-        "\n"
-        "  Tip: Install NSSM (https://nssm.cc) for service logs under "
-        r"C:\ProgramData\Netorium\."
     )
 
 

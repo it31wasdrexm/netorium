@@ -105,7 +105,7 @@ def status() -> None:
         console.print("Run: netorium agent enroll --controller URL --token TOKEN")
 
 
-@app.command()
+@app.command("run", hidden=True)
 def run() -> None:
     """Run the endpoint agent in the foreground (one heartbeat)."""
     try:

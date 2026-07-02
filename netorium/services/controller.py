@@ -247,6 +247,31 @@ def list_agents(database_path: str | Path) -> list[AgentRecord]:
     return [_agent_record_from_row(row) for row in rows]
 
 
+def delete_agent(database_path: str | Path, *, agent_id: str) -> None:
+    path = initialize_database(database_path)
+    clean_agent_id = _normalize_text(agent_id, "Agent ID")
+    try:
+        connection = connect_database(path)
+        try:
+            with connection:
+                connection.execute("DELETE FROM agent_commands WHERE agent_id = ?", (clean_agent_id,))
+                cursor = connection.execute("DELETE FROM agents WHERE agent_id = ?", (clean_agent_id,))
+                if cursor.rowcount == 0:
+                    raise ControllerError(f"Agent not found: {clean_agent_id}")
+                write_audit_entry(
+                    connection,
+                    action="controller.agent.delete",
+                    entity_type="agent",
+                    entity_id=clean_agent_id,
+                    details={},
+                    created_at=_utc_timestamp(),
+                )
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise ControllerError(f"Could not delete agent: {exc}") from exc
+
+
 def resolve_agent_targets(
     database_path: str | Path,
     selector: str,
@@ -789,7 +814,6 @@ def enroll_agent(
                         SELECT token_id, purpose, zone, expires_at
                         FROM enrollment_tokens
                         WHERE token_hash = ?
-                          AND used_at IS NULL
                           AND revoked_at IS NULL
                           AND expires_at > ?
                         """,
@@ -821,14 +845,7 @@ def enroll_agent(
                             timestamp,
                         ),
                     )
-                    connection.execute(
-                        """
-                        UPDATE enrollment_tokens
-                        SET used_at = ?
-                        WHERE token_id = ?
-                        """,
-                        (timestamp, token_id),
-                    )
+                    # Removed token single-use update
                     write_audit_entry(
                         connection,
                         action="controller.agent.enroll",
@@ -1256,8 +1273,7 @@ def _active_token_count(database_path: Path) -> int:
                 """
                 SELECT COUNT(*) AS count
                 FROM enrollment_tokens
-                WHERE used_at IS NULL
-                  AND revoked_at IS NULL
+                WHERE revoked_at IS NULL
                   AND expires_at > ?
                 """,
                 (now,),

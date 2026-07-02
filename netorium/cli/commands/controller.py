@@ -121,7 +121,7 @@ def status() -> None:
         console.print("Run: netorium controller init")
 
 
-@controller_app.command("start")
+@controller_app.command("start", hidden=True)
 def start(
     host: Annotated[
         str,
@@ -232,6 +232,23 @@ def agent_list() -> None:
             agent.last_seen_at or "-",
         )
     console.print(table)
+
+
+@agent_app.command("remove")
+def agent_remove(
+    agent_id: Annotated[
+        str,
+        typer.Argument(help="Endpoint agent ID to remove."),
+    ],
+) -> None:
+    """Remove an enrolled endpoint agent."""
+    from netorium.services.controller import delete_agent
+    try:
+        delete_agent(_database_path(), agent_id=agent_id)
+    except (ConfigError, DatabaseError, ControllerError) as exc:
+        _fail(exc)
+    console.print(f"Agent {agent_id} removed.")
+
 
 
 @agent_command_app.command("firewall")

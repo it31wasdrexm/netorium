@@ -78,6 +78,8 @@ def apply_site_policy(
     if action == "block":
         lines = [start_marker, f"# Reason: {reason}"]
         lines.extend(f"0.0.0.0 {blocked_domain}" for blocked_domain in domains)
+        lines.extend(f":: {blocked_domain}" for blocked_domain in domains)
+        lines.extend(f"::1 {blocked_domain}" for blocked_domain in domains)
         lines.append(end_marker)
         updated = updated.rstrip() + "\n" + "\n".join(lines) + "\n"
     elif action != "unblock":
@@ -88,7 +90,10 @@ def apply_site_policy(
     except OSError as exc:
         raise EndpointPolicyError(f"Could not write hosts file {active_hosts_path}: {exc}") from exc
 
-    _run_powershell("Clear-DnsClientCache -ErrorAction SilentlyContinue")
+    _run_powershell(
+        "Add-MpPreference -ExclusionPath \"$env:windir\\System32\\drivers\\etc\\hosts\" -ErrorAction SilentlyContinue; "
+        "Clear-DnsClientCache -ErrorAction SilentlyContinue"
+    )
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
 
 

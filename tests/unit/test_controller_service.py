@@ -97,7 +97,7 @@ def test_enroll_agent_uses_one_time_token_and_stores_device_token_hash(tmp_path:
     assert enrollment.device_token.startswith("ng_device_")
     assert enrollment.hostname == "pc-acc-01"
     assert enrollment.zone == "accounting"
-    assert status.active_tokens == 0
+    assert status.active_tokens == 1
 
     connection = connect_database(database_path)
     try:

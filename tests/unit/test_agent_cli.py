@@ -21,7 +21,6 @@ def test_agent_help_shows_commands() -> None:
     assert "Netorium endpoint agent" in result.output
     assert "enroll" in result.output
     assert "status" in result.output
-    assert "run" in result.output
     assert "update" in result.output
 
 

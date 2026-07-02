@@ -20,7 +20,7 @@ Welcome to **Netorium**! Manage your corporate networks by meaningful zones (lik
 - **AD & PRTG Ready**: Sync with Active Directory and monitor via PRTG.
 - **Cross-Platform Controller**: Run the brain on Linux, Mac, or Windows.
 
-### 📥 Download & Install
+###  Download & Install
 
 **For Windows (PowerShell):**
 ```powershell

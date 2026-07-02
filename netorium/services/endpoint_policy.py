@@ -118,14 +118,25 @@ def apply_site_policy(
             )
         ps_lines.extend([
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Force | Out-Null }",
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
-            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Force | Out-Null }; "
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue; "
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
-            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Force | Out-Null }; "
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Name 'DNSOverHTTPS' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Force | Out-Null }",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox\\DNSOverHTTPS')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox\\DNSOverHTTPS' -Force | Out-Null }",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox\\DNSOverHTTPS' -Name 'Enabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue",
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Force | Out-Null }",
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue"
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\YandexBrowser')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\YandexBrowser' -Force | Out-Null }",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\YandexBrowser' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\YandexBrowser' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave' -Force | Out-Null }",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue",
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Vivaldi')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Vivaldi' -Force | Out-Null }",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Vivaldi' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Vivaldi' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue"
         ])
         _run_powershell("; ".join(ps_lines))
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")

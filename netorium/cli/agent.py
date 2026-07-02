@@ -14,6 +14,7 @@ from netorium.services.agent import (
     run_agent_loop,
     run_agent_once,
     try_provision_agent_background_service,
+    service_action,
 )
 
 app = typer.Typer(
@@ -147,6 +148,40 @@ def update_check() -> None:
 
 
 app.add_typer(update_app, name="update")
+
+@service_app.command("install")
+def service_install() -> None:
+    """Install the agent background service."""
+    try:
+        console.print(service_action("install"))
+    except AgentError as exc:
+        _fail(exc)
+
+@service_app.command("start")
+def service_start() -> None:
+    """Start the agent background service."""
+    try:
+        console.print(service_action("start"))
+    except AgentError as exc:
+        _fail(exc)
+
+@service_app.command("stop")
+def service_stop() -> None:
+    """Stop the agent background service."""
+    try:
+        console.print(service_action("stop"))
+    except AgentError as exc:
+        _fail(exc)
+
+@service_app.command("uninstall")
+def service_uninstall() -> None:
+    """Uninstall the agent background service."""
+    try:
+        console.print(service_action("uninstall"))
+    except AgentError as exc:
+        _fail(exc)
+
+app.add_typer(service_app, name="service")
 
 
 def _fail(exc: Exception) -> None:

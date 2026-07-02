@@ -97,7 +97,13 @@ def apply_site_policy(
     )
     if action == "block":
         _run_powershell(
-            "New-NetFirewallRule -DisplayName 'Netorium Block QUIC' -Direction Outbound -Protocol UDP -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue"
+            "New-NetFirewallRule -DisplayName 'Netorium Block QUIC' -Direction Outbound -Protocol UDP -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue; "
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Force | Out-Null }; "
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Force | Out-Null }; "
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue; "
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Force | Out-Null }; "
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Name 'DNSOverHTTPS' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue"
         )
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
 
@@ -163,7 +169,7 @@ def apply_speed_policy(
     if action == "clear":
         _run_powershell(
             f"Remove-NetQosPolicy -Name {_ps_quote(policy_name)} "
-            "-PolicyStore ActiveStore -Confirm:$false -ErrorAction SilentlyContinue"
+            "-PolicyStore PersistentStore -Confirm:$false -ErrorAction SilentlyContinue"
         )
         return EndpointPolicyResult("Windows QoS speed limit cleared.")
     if action != "limit":
@@ -175,11 +181,11 @@ def apply_speed_policy(
     throttle_bits = throttle_kbps * 1000
     script = (
         f"$Name = {_ps_quote(policy_name)}; "
-        "Remove-NetQosPolicy -Name $Name -PolicyStore ActiveStore "
+        "Remove-NetQosPolicy -Name $Name -PolicyStore PersistentStore "
         "-Confirm:$false -ErrorAction SilentlyContinue; "
         "New-NetQosPolicy "
         "-Name $Name "
-        "-PolicyStore ActiveStore "
+        "-PolicyStore PersistentStore "
         f"-ThrottleRateActionBitsPerSecond {throttle_bits} "
         f"-NetworkProfile All "
         f"-Precedence 127 "
@@ -252,12 +258,20 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
     return (
         f"$Name = {_ps_quote(rule_name)}; "
         f"$ExeName = {_ps_quote(executable)}; "
-        "$SearchRoots = @("
-        "$env:ProgramFiles, "
-        "${env:ProgramFiles(x86)}, "
-        "$env:LOCALAPPDATA, "
-        "$env:APPDATA"
-        "); "
+        "$Matches = @(); "
+        "$running = Get-Process | Where-Object { $_.ProcessName -eq $ExeName.Replace('.exe','') } | Select-Object -ExpandProperty Path -Unique -ErrorAction SilentlyContinue; "
+        "if ($running) { $Matches += $running } "
+        "else { "
+        "$regPaths = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths', 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths'); "
+        "foreach ($rp in $regPaths) { "
+        "  $key = Join-Path $rp $ExeName; "
+        "  if (Test-Path $key) { "
+        "    $val = Get-ItemProperty $key -Name '(default)' -ErrorAction SilentlyContinue; "
+        "    if ($val) { $Matches += $val.'(default)' } "
+        "  } "
+        "} "
+        "if ($Matches.Count -eq 0) { "
+        "$SearchRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:APPDATA); "
         "$Drives = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 } | Select-Object -ExpandProperty DeviceID; "
         "foreach ($Drive in $Drives) { "
         "$SearchRoots += (Join-Path $Drive 'SteamLibrary\\steamapps\\common'); "
@@ -267,23 +281,18 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         "$SearchRoots += (Join-Path $Drive 'Epic Games'); "
         "} "
         "$SearchRoots = $SearchRoots | Where-Object { $_ -and (Test-Path $_) }; "
-        "$Matches = foreach ($Root in $SearchRoots) { "
-        "Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 6 "
-        "-ErrorAction SilentlyContinue }; "
-        "$Matches = @($Matches | Select-Object -ExpandProperty FullName -Unique); "
-        "if ($Matches.Count -eq 0) { "
-        f"throw 'Executable not found: {executable}'; "
+        "foreach ($Root in $SearchRoots) { "
+        "  $found = Get-ChildItem -Path $Root -Filter $ExeName -File -Recurse -Depth 4 -ErrorAction SilentlyContinue; "
+        "  if ($found) { $Matches += $found | Select-Object -ExpandProperty FullName -Unique; break; } "
         "} "
+        "} "
+        "} "
+        "$Matches = @($Matches | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique); "
+        "if ($Matches.Count -eq 0) { throw 'Executable not found: ' + $ExeName; } "
         "Remove-NetFirewallRule -DisplayName $Name -ErrorAction SilentlyContinue; "
         "foreach ($Program in $Matches) { "
-        "New-NetFirewallRule "
-        "-DisplayName $Name "
-        "-Direction Outbound "
-        "-Program $Program "
-        "-Action Block "
-        "-Profile Any "
-        f"-Description {_ps_quote(reason)} "
-        "-ErrorAction Stop "
+        "New-NetFirewallRule -DisplayName $Name -Direction Outbound -Program $Program -Action Block -Profile Any "
+        f"-Description {_ps_quote(reason)} -ErrorAction Stop | Out-Null "
         "}"
     )
 

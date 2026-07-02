@@ -5,7 +5,7 @@
 **Next-Generation Building-level Network Access Control**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/Apache-2.0 license.svg)](LICENSE)
 
 </div>
 

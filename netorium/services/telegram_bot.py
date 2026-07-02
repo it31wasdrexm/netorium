@@ -13,12 +13,8 @@ from netorium.services.controller import (
     enqueue_agent_app_commands,
     enqueue_agent_speed_commands,
 )
-from netorium.services.traffic import get_traffic_report
 
 logger = logging.getLogger(__name__)
-
-# Keep track of notified anomalous IPs to prevent alert fatigue
-NOTIFIED_IPS: set[str] = set()
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> None:
     """Send a message to a specific chat ID using the bot token."""
@@ -39,7 +35,7 @@ def start_telegram_bot(token: str, chat_id: str, db_path: Path) -> None:
     Start the Telegram bot long polling loop.
     Processes messages from the configured admin chat_id and runs periodic anomaly monitoring.
     """
-    print(f"Starting Netorium Telegram bot (monitoring anomalies, authorized chat ID: {chat_id})...")
+    print(f"Starting Netorium Telegram bot (authorized chat ID: {chat_id})...")
     print("Press Ctrl+C to stop the bot and exit.")
     
     # Send a startup notification
@@ -50,17 +46,9 @@ def start_telegram_bot(token: str, chat_id: str, db_path: Path) -> None:
     )
 
     offset = 0
-    last_anomaly_check = 0.0
-
     while True:
         try:
-            # 1. Periodic anomaly monitoring check (every 15 seconds)
-            now = time.time()
-            if now - last_anomaly_check > 15:
-                last_anomaly_check = now
-                _check_traffic_anomalies(token, chat_id, db_path)
-
-            # 2. Get updates (long polling)
+            # Get updates (long polling)
             url = f"https://api.telegram.org/bot{token}/getUpdates"
             try:
                 response = requests.get(
@@ -118,38 +106,6 @@ def _send_unauthorized_reply(token: str, chat_id: str) -> None:
     text = "⚠️ <b>Access Denied.</b> Your chat ID is not authorized to interact with this Netorium instance."
     send_telegram_message(token, chat_id, text)
 
-def _check_traffic_anomalies(token: str, chat_id: str, db_path: Path) -> None:
-    """Scan device traffic, notify about new anomalies, and clear resolved ones."""
-    try:
-        records = get_traffic_report(db_path)
-    except Exception as exc:
-        logger.error(f"Anomaly check failed to query traffic report: {exc}")
-        return
-
-    current_anomalies = {r.ip_address for r in records if r.is_anomaly}
-    
-    # Check for new anomalies
-    for r in records:
-        if r.is_anomaly and r.ip_address not in NOTIFIED_IPS:
-            NOTIFIED_IPS.add(r.ip_address)
-            msg = (
-                f"🚨 <b>Traffic Anomaly Detected!</b>\n\n"
-                f"<b>IP:</b> {r.ip_address}\n"
-                f"<b>Hostname:</b> {r.hostname}\n"
-                f"<b>Zone:</b> {r.zone_name}\n"
-                f"<b>Total Usage:</b> {r.total_mb:.2f} MB\n"
-                f"<b>Details:</b> {r.anomaly_reason}\n\n"
-                f"<i>You can use /limit_speed or /block_site to reduce their speed or block traffic.</i>"
-            )
-            send_telegram_message(token, chat_id, msg)
-
-    # Clean up resolved anomalies from notified set
-    resolved_ips = NOTIFIED_IPS - current_anomalies
-    for ip in resolved_ips:
-        NOTIFIED_IPS.remove(ip)
-        # Notify that the anomaly resolved/restored
-        send_telegram_message(token, chat_id, f"✅ <b>Traffic Normal:</b> Device at {ip} has returned to normal limits.")
-
 def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> None:
     parts = text.split()
     command = parts[0].lower()
@@ -160,9 +116,7 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             "📊 <b>Status & Monitoring:</b>\n"
             "/status - View Controller status\n"
             "/agents - List enrolled endpoint agents\n"
-            "/policies - List queued and completed commands\n"
-            "/traffic - Get current traffic report\n"
-            "/anomalies - View active traffic anomalies\n\n"
+            "/policies - List queued and completed commands\n\n"
             "🛡️ <b>Access Policies:</b>\n"
             "/block_site <code>&lt;target&gt;</code> <code>&lt;domain&gt;</code> - Block site (e.g. <code>/block_site pc-acc-01 youtube.com</code>)\n"
             "/unblock_site <code>&lt;target&gt;</code> <code>&lt;domain&gt;</code> - Unblock site\n"
@@ -212,36 +166,6 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             # Show last 10 commands to keep message size reasonable
             for cmd in commands[-10:]:
                 lines.append(f"• ID: <code>{cmd.command_id}</code> | Agent: <code>{cmd.agent_id}</code> | {cmd.command_type} | <b>{cmd.status}</b>")
-            send_telegram_message(token, chat_id, "\n".join(lines))
-        except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Error: {exc}")
-
-    elif command == "/traffic":
-        try:
-            records = get_traffic_report(db_path)
-            if not records:
-                send_telegram_message(token, chat_id, "ℹ️ No traffic data available.")
-                return
-            
-            lines = ["📊 <b>Traffic Report:</b>"]
-            for r in records:
-                traffic_status = "⚠️ Anomaly" if r.is_anomaly else "OK"
-                lines.append(f"• <b>{r.hostname}</b> ({r.ip_address}) | Down: {r.download_mb:.1f} MB | Up: {r.upload_mb:.1f} MB | {traffic_status}")
-            send_telegram_message(token, chat_id, "\n".join(lines))
-        except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Error: {exc}")
-
-    elif command == "/anomalies":
-        try:
-            records = get_traffic_report(db_path)
-            anomalies = [r for r in records if r.is_anomaly]
-            if not anomalies:
-                send_telegram_message(token, chat_id, "✅ No active traffic anomalies detected.")
-                return
-            
-            lines = ["🚨 <b>Active Traffic Anomalies:</b>"]
-            for r in anomalies:
-                lines.append(f"• <b>{r.hostname}</b> | {r.zone_name} | {r.total_mb:.1f} MB | {r.anomaly_reason}")
             send_telegram_message(token, chat_id, "\n".join(lines))
         except Exception as exc:
             send_telegram_message(token, chat_id, f"❌ Error: {exc}")

@@ -14,7 +14,7 @@ from typing import Callable, Literal, Mapping, Protocol, cast
 
 from netorium.core.platform import user_cache_dir, user_config_path, user_data_dir
 from netorium.core.settings import ConfigError, read_config_data
-from netorium.services.update_checker import DEFAULT_PACKAGE_NAME
+DEFAULT_PACKAGE_NAME = "netorium-cli"
 
 PackageManager = Literal["auto", "pipx", "pip", "standalone", "none"]
 SelectedPackageManager = Literal["pipx", "pip", "standalone", "none"]

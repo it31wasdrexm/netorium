@@ -92,8 +92,13 @@ def apply_site_policy(
 
     _run_powershell(
         "Add-MpPreference -ExclusionPath \"$env:windir\\System32\\drivers\\etc\\hosts\" -ErrorAction SilentlyContinue; "
-        "Clear-DnsClientCache -ErrorAction SilentlyContinue"
+        "Clear-DnsClientCache -ErrorAction SilentlyContinue; "
+        "ipconfig /flushdns | Out-Null"
     )
+    if action == "block":
+        _run_powershell(
+            "New-NetFirewallRule -DisplayName 'Netorium Block QUIC' -Direction Outbound -Protocol UDP -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue"
+        )
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
 
 
@@ -106,6 +111,28 @@ def apply_app_policy(
 ) -> EndpointPolicyResult:
     _require_windows(platform_name)
     rule_name = _rule_name("App", executable)
+    
+    # Map common aliases to their actual executable names
+    aliases = {
+        "tg": "Telegram.exe",
+        "tg.exe": "Telegram.exe",
+        "telegram": "Telegram.exe",
+        "dota": "dota2.exe",
+        "dota.exe": "dota2.exe",
+        "dota2": "dota2.exe",
+        "cs1.6": "hl.exe",
+        "cs16": "hl.exe",
+        "minecraft": "MinecraftLauncher.exe",
+        "mc": "MinecraftLauncher.exe",
+        "discord": "Discord.exe",
+        "steam": "steam.exe",
+        "epic": "EpicGamesLauncher.exe"
+    }
+    
+    executable_lower = executable.lower()
+    if executable_lower in aliases:
+        executable = aliases[executable_lower]
+
     if action == "block":
         if _looks_like_executable_path(executable):
             script = _app_block_program_script(rule_name, executable, reason)
@@ -228,7 +255,8 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         "$SearchRoots = @("
         "$env:ProgramFiles, "
         "${env:ProgramFiles(x86)}, "
-        "$env:LOCALAPPDATA"
+        "$env:LOCALAPPDATA, "
+        "$env:APPDATA"
         "); "
         "$Drives = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 } | Select-Object -ExpandProperty DeviceID; "
         "foreach ($Drive in $Drives) { "

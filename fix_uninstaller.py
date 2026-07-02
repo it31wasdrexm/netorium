@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 content = Path("netorium/services/uninstaller.py").read_text()

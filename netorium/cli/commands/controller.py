@@ -33,10 +33,7 @@ from netorium.services.controller import (
     serve_controller,
 )
 from netorium.services.controller_service import (
-    ControllerServiceError,
-    install_controller_service,
     try_provision_controller_background_service,
-    uninstall_controller_service,
 )
 
 controller_app = typer.Typer(

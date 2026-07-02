@@ -7,32 +7,23 @@ from typing import Annotated
 import typer
 from rich import box
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from typer.main import get_command
+from rich.align import Align
 
 from netorium.cli.branding import (
-    MUTED_STYLE,
-    render_info_panel,
     render_logo_panel,
     render_notice_panel,
 )
 
 from netorium.cli.agent import app as endpoint_agent_app
-from netorium.cli.commands.ad import ad_app
-from netorium.cli.commands.audit import audit_app
 from netorium.cli.commands.config import config_app
 from netorium.cli.commands.controller import controller_app, policy_app
-from netorium.cli.commands.deploy import deploy_app
 from netorium.cli.commands.device import device_app
-from netorium.cli.commands.docs import docs_app
 from netorium.cli.commands.firewall import firewall_app
-from netorium.cli.commands.prtg import prtg_app
 from netorium.cli.commands.telegram import telegram_app
-from netorium.cli.commands.update import update_app
 from netorium.cli.commands.zone import zone_app
-from netorium.cli.commands.report import report_app
 from netorium.core.metadata import APP_NAME, get_version
 from netorium.core.settings import default_config_path
 from netorium.services.controller_service import (
@@ -41,7 +32,6 @@ from netorium.services.controller_service import (
     uninstall_services_silently,
     reexec_windows_admin_if_needed,
 )
-from netorium.services.update_notifications import StartupUpdateNotice, get_startup_update_notice
 from netorium.services.uninstaller import (
     UninstallError,
     UninstallPlan,
@@ -73,19 +63,12 @@ app = typer.Typer(
 )
 
 app.add_typer(config_app, name="config", rich_help_panel="Setup")
-app.add_typer(docs_app, name="docs", rich_help_panel="Setup")
-app.add_typer(update_app, name="update", rich_help_panel="Setup")
 app.add_typer(controller_app, name="controller", rich_help_panel="Controller")
 app.add_typer(policy_app, name="policy", rich_help_panel="Controller")
-app.add_typer(deploy_app, name="deploy", rich_help_panel="Controller")
 app.add_typer(endpoint_agent_app, name="agent", rich_help_panel="Controller")
 app.add_typer(zone_app, name="zone", rich_help_panel="Inventory")
 app.add_typer(device_app, name="device", rich_help_panel="Inventory")
 app.add_typer(firewall_app, name="firewall", rich_help_panel="Policy")
-app.add_typer(report_app, name="report", rich_help_panel="Policy")
-app.add_typer(audit_app, name="audit", rich_help_panel="Policy")
-app.add_typer(prtg_app, name="prtg", rich_help_panel="Integrations")
-app.add_typer(ad_app, name="ad", rich_help_panel="Integrations")
 app.add_typer(telegram_app, name="telegram", rich_help_panel="Integrations")
 
 
@@ -136,7 +119,6 @@ def _run_interactive_command(args: list[str]) -> None:
 
 
 def _run_interactive_shell() -> None:
-    _render_startup_update_notice()
     _render_interactive_header()
 
     while True:
@@ -184,8 +166,6 @@ def _run_interactive_sudo(args: list[str]) -> None:
         error_console.print(f"[red]sudo exited with code {result.returncode}[/]")
 
 
-from rich.align import Align
-
 def _render_interactive_header() -> None:
     console.print()
     console.print(render_logo_panel(subtitle="zero-trust network control", border_style="magenta"))
@@ -208,42 +188,6 @@ def _render_interactive_header() -> None:
     )
     console.print(Align.center(hint))
     console.print()
-
-
-def _render_startup_update_notice() -> None:
-    notice = get_startup_update_notice()
-    if notice is None:
-        return
-
-    console.print(_startup_update_panel(notice))
-
-
-def _startup_update_panel(notice: StartupUpdateNotice) -> Panel:
-    platform_info = notice.platform
-    body = Table.grid(padding=(0, 2))
-    body.add_column(style="magenta", justify="right")
-    body.add_column()
-    
-    body.add_row("Platform", platform_info.platform_name)
-    body.add_row("Install", f"[bold bright_cyan]{platform_info.install_command}[/]")
-    if platform_info.standalone_command:
-        body.add_row("Standalone", f"[bright_black]{platform_info.standalone_command}[/]")
-    body.add_row("Release", f"[underline blue]{notice.info.release_url}[/]")
-    
-    title = Text.assemble(
-        ("✨ ", "yellow"),
-        ("Update available: ", "bold white"),
-        (notice.info.current_version, "bright_black"),
-        (" → ", "bright_black"),
-        (notice.info.latest_version, "bold bright_green")
-    )
-    
-    return Panel(
-        Align.center(body),
-        title=title,
-        border_style="magenta",
-        padding=(1, 2),
-    )
 
 
 @app.callback(invoke_without_command=True)

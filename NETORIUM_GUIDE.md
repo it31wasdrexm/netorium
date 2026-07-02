@@ -106,7 +106,7 @@ netorium prtg sync
 
 ---
 
-## ⚙️ Configuration
+##  Configuration
 
 Your Netorium configuration is stored here:
 * **Windows:** `%APPDATA%\Netorium\config.toml`

@@ -102,8 +102,11 @@ def apply_site_policy(
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Google\\Chrome' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Force | Out-Null }; "
             "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'BuiltInDnsClientEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue; "
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue; "
             "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Force | Out-Null }; "
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Name 'DNSOverHTTPS' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue"
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Mozilla\\Firefox' -Name 'DNSOverHTTPS' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; "
+            "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Force | Out-Null }; "
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Yandex\\Browser' -Name 'DnsOverHttpsMode' -Value 'off' -Force -ErrorAction SilentlyContinue"
         )
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
 
@@ -181,6 +184,8 @@ def apply_speed_policy(
     throttle_bits = throttle_kbps * 1000
     script = (
         f"$Name = {_ps_quote(policy_name)}; "
+        "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\QoS')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\QoS' -Force | Out-Null }; "
+        "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\QoS' -Name 'Do not use NLA' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; "
         "Remove-NetQosPolicy -Name $Name -PolicyStore PersistentStore "
         "-Confirm:$false -ErrorAction SilentlyContinue; "
         "New-NetQosPolicy "
@@ -250,6 +255,14 @@ def _app_block_program_script(rule_name: str, executable: str, reason: str) -> s
         "-Action Block "
         "-Profile Any "
         f"-Description {_ps_quote(reason)} "
+        "-ErrorAction Stop | Out-Null; "
+        "New-NetFirewallRule "
+        "-DisplayName $Name "
+        "-Direction Inbound "
+        f"-Program {_ps_quote(executable)} "
+        "-Action Block "
+        "-Profile Any "
+        f"-Description {_ps_quote(reason)} "
         "-ErrorAction Stop"
     )
 
@@ -292,6 +305,8 @@ def _app_block_by_name_script(rule_name: str, executable: str, reason: str) -> s
         "Remove-NetFirewallRule -DisplayName $Name -ErrorAction SilentlyContinue; "
         "foreach ($Program in $Matches) { "
         "New-NetFirewallRule -DisplayName $Name -Direction Outbound -Program $Program -Action Block -Profile Any "
+        f"-Description {_ps_quote(reason)} -ErrorAction Stop | Out-Null; "
+        "New-NetFirewallRule -DisplayName $Name -Direction Inbound -Program $Program -Action Block -Profile Any "
         f"-Description {_ps_quote(reason)} -ErrorAction Stop | Out-Null "
         "}"
     )

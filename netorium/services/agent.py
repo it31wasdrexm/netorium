@@ -517,7 +517,12 @@ def _windows_service_action(action: str) -> str:
 
     if action == "start":
         if nssm:
-            _run_service_cmd([nssm, "start", svc])
+            try:
+                _run_service_cmd([nssm, "start", svc])
+            except AgentError as exc:
+                completed = run_text_optional(["sc.exe", "query", svc])
+                if "RUNNING" not in completed.stdout and "RUNNING" not in completed.stderr:
+                    raise exc
         else:
             try:
                 _run_service_cmd(build_sc_start_command(svc))

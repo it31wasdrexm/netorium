@@ -23,6 +23,7 @@ from netorium.cli.commands.controller import controller_app, policy_app
 from netorium.cli.commands.device import device_app
 from netorium.cli.commands.firewall import firewall_app
 from netorium.cli.commands.telegram import telegram_app
+from netorium.cli.commands.update import update_app
 from netorium.cli.commands.zone import zone_app
 from netorium.core.metadata import APP_NAME, get_version
 from netorium.core.settings import default_config_path
@@ -32,6 +33,7 @@ from netorium.services.controller_service import (
     uninstall_services_silently,
     reexec_windows_admin_if_needed,
 )
+from netorium.services.update_notifications import StartupUpdateNotice, get_startup_update_notice
 from netorium.services.uninstaller import (
     UninstallError,
     UninstallPlan,
@@ -63,6 +65,7 @@ app = typer.Typer(
 )
 
 app.add_typer(config_app, name="config", rich_help_panel="Setup")
+app.add_typer(update_app, name="update", rich_help_panel="Setup")
 app.add_typer(controller_app, name="controller", rich_help_panel="Controller")
 app.add_typer(policy_app, name="policy", rich_help_panel="Controller")
 app.add_typer(endpoint_agent_app, name="agent", rich_help_panel="Controller")
@@ -119,6 +122,7 @@ def _run_interactive_command(args: list[str]) -> None:
 
 
 def _run_interactive_shell() -> None:
+    _render_startup_update_notice()
     _render_interactive_header()
 
     while True:
@@ -188,6 +192,40 @@ def _render_interactive_header() -> None:
     )
     console.print(Align.center(hint))
     console.print()
+
+
+def _render_startup_update_notice() -> None:
+    notice = get_startup_update_notice()
+    if notice is None:
+        return
+
+    from rich.panel import Panel
+    
+    platform_info = notice.platform
+    body = Table.grid(padding=(0, 2))
+    body.add_column(style="magenta", justify="right")
+    body.add_column()
+    
+    body.add_row("Platform", platform_info.platform_name)
+    body.add_row("Install", f"[bold bright_cyan]{platform_info.install_command}[/]")
+    if platform_info.standalone_command:
+        body.add_row("Standalone", f"[bright_black]{platform_info.standalone_command}[/]")
+    body.add_row("Release", f"[underline blue]{notice.info.release_url}[/]")
+    
+    title = Text.assemble(
+        ("✨ ", "yellow"),
+        ("Update available: ", "bold white"),
+        (notice.info.current_version, "bright_black"),
+        (" → ", "bright_black"),
+        (notice.info.latest_version, "bold bright_green")
+    )
+    
+    console.print(Panel(
+        Align.center(body),
+        title=title,
+        border_style="magenta",
+        padding=(1, 2),
+    ))
 
 
 @app.callback(invoke_without_command=True)

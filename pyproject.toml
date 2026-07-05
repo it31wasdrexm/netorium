@@ -12,6 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Netorium Contributors" }]
 dependencies = [
   "typer>=0.12",
+  "click>=8.2.1",
   "rich>=13.7",
   "requests>=2.32",
   "ldap3>=2.9",

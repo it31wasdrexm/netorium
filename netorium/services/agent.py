@@ -266,7 +266,7 @@ def run_agent_loop(
     state_path: str | Path | None = None,
     *,
     client: HttpClient | None = None,
-    interval_seconds: float = 5.0,
+    interval_seconds: float = 2.0,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> None:
     """Run the agent heartbeat loop forever (used by the background service)."""
@@ -285,12 +285,48 @@ def run_agent_loop(
         time.sleep(interval_seconds)
 
 
-def try_provision_agent_background_service() -> str | None:
+def try_provision_agent_background_service() -> str:
     """Install and start the agent background service when enrollment succeeded."""
     try:
         return service_action("install")
     except AgentError:
-        return None
+        pass
+
+    try:
+        return service_action("start")
+    except AgentError:
+        pass
+
+    return _start_detached_agent_loop()
+
+
+def _start_detached_agent_loop() -> str:
+    """Fall back to a detached heartbeat loop when service install is unavailable."""
+    executable = _find_netorium_executable()
+    popen_kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if sys.platform.startswith("win"):
+        popen_kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    try:
+        subprocess.Popen([executable, "agent", "run-loop"], **popen_kwargs)
+    except OSError as exc:
+        raise AgentError(f"Could not start background agent loop: {exc}") from exc
+
+    return (
+        "Agent heartbeat loop started in the background.\n"
+        "  Commands from the controller are applied automatically."
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

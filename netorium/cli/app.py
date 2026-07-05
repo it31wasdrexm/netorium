@@ -308,6 +308,9 @@ def uninstall(
         package_manager=package_manager,
     )
 
+    if yes and remove_data is None:
+        remove_data = True
+
     if dry_run:
         _preview_uninstall(remove_data=bool(remove_data), package_manager=package_manager)
         return

@@ -212,11 +212,13 @@ def uninstall_services_silently() -> None:
             _run_optional(["sudo", "systemctl", "disable", "netorium-controller"])
             _run_optional(["systemctl", "--user", "stop", "netorium-controller"])
             _run_optional(["systemctl", "--user", "disable", "netorium-controller"])
+            _remove_linux_user_unit("netorium-controller.service")
 
             _run_optional(["sudo", "systemctl", "stop", "netorium-agent"])
             _run_optional(["sudo", "systemctl", "disable", "netorium-agent"])
             _run_optional(["systemctl", "--user", "stop", "netorium-agent"])
             _run_optional(["systemctl", "--user", "disable", "netorium-agent"])
+            _remove_linux_user_unit("netorium-agent.service")
         elif sys.platform == "darwin":
             # Best effort
             pass
@@ -736,6 +738,17 @@ def _run(cmd: list[str]) -> None:
         raise ControllerServiceError(
             f"Command failed: {command_text}" + (f"\n{details}" if details else "")
         ) from exc
+
+
+def _remove_linux_user_unit(unit_name: str) -> None:
+    unit_dir = _systemd_user_dir()
+    unit_file = unit_dir / unit_name
+    try:
+        if unit_file.exists():
+            unit_file.unlink()
+    except OSError:
+        pass
+    _run_optional(["systemctl", "--user", "daemon-reload"])
 
 
 def _run_optional(cmd: list[str]) -> None:

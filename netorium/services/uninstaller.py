@@ -69,17 +69,18 @@ def build_uninstall_plan(
     active_which = which or shutil.which
     active_executable = executable or sys.executable
     active_platform = platform_name or sys.platform
+    config_path = user_config_path(platform_name=active_platform, env=env)
+    data_dir = user_data_dir(platform_name=active_platform, env=env)
+    cache_dir = user_cache_dir(platform_name=active_platform, env=env)
     resolved_manager, package_command = _build_package_command(
         selected_manager,
         package_name=package_name,
         executable=active_executable,
+        data_dir=data_dir,
         platform_name=active_platform,
         which=active_which,
     )
 
-    config_path = user_config_path(platform_name=active_platform, env=env)
-    data_dir = user_data_dir(platform_name=active_platform, env=env)
-    cache_dir = user_cache_dir(platform_name=active_platform, env=env)
     configured_database_path = _read_configured_database_path(config_path)
     executable_path = Path(active_executable)
 
@@ -110,18 +111,30 @@ def build_uninstall_plan(
 
         path_targets = _dedupe_targets(targets)
 
+    install_artifact_targets = _install_artifact_targets(
+        executable=executable_path,
+        data_dir=data_dir,
+        platform_name=active_platform,
+        which=active_which,
+        remove_data=remove_data,
+        config_dir=config_path.parent,
+        cache_dir=cache_dir,
+    )
+
     package_command_detached = False
     if resolved_manager == "standalone":
         if active_platform.startswith("win"):
             package_command_detached = True
-            deferred_targets = _windows_install_targets(
-                executable=executable_path,
-                remove_data=remove_data,
-                config_dir=config_path.parent,
-                data_dir=data_dir,
-                cache_dir=cache_dir,
+            deferred_targets = _dedupe_targets(
+                [*install_artifact_targets, *_windows_install_targets(
+                    executable=executable_path,
+                    remove_data=remove_data,
+                    config_dir=config_path.parent,
+                    data_dir=data_dir,
+                    cache_dir=cache_dir,
+                )]
             )
-            deferred_path_targets = _dedupe_targets(deferred_targets)
+            deferred_path_targets = deferred_targets
             path_targets = ()
             bin_dir = _windows_bin_dir(executable_path, data_dir=data_dir)
             package_command = _windows_deferred_remove_command(
@@ -130,19 +143,22 @@ def build_uninstall_plan(
                 executable=executable_path,
             )
         else:
-            path_targets = _dedupe_targets(
-                [
-                    UninstallPathTarget("Standalone executable", Path(active_executable)),
-                    *path_targets,
-                ]
+            package_command_detached = True
+            deferred_path_targets = _dedupe_targets([*install_artifact_targets, *path_targets])
+            path_targets = ()
+            package_command = _linux_deferred_remove_command(
+                deferred_path_targets,
+                launcher_path=_resolve_launcher_path(active_which),
             )
-            package_command = None
     elif package_command is not None and resolved_manager in {"pipx", "pip"}:
         package_command_detached = True
+        deferred_path_targets = _dedupe_targets([*install_artifact_targets, *path_targets])
+        path_targets = ()
         package_command = _build_deferred_package_command(
             package_command,
             platform_name=active_platform,
             launcher_path=_resolve_launcher_path(active_which),
+            extra_paths=tuple(target.path for target in install_artifact_targets),
         )
 
     return UninstallPlan(
@@ -222,6 +238,7 @@ def _build_package_command(
     *,
     package_name: str,
     executable: str,
+    data_dir: Path,
     platform_name: str,
     which: Callable[[str], str | None],
 ) -> tuple[SelectedPackageManager, tuple[str, ...] | None]:
@@ -239,6 +256,11 @@ def _build_package_command(
     if package_manager == "pip":
         return "pip", _pip_uninstall_command(executable, package_name, which=which)
 
+    executable_path = Path(executable)
+    venv_dir = data_dir / "venv"
+    if _is_relative_to(executable_path, venv_dir):
+        return "pip", _pip_uninstall_command(executable, package_name, which=which)
+
     if getattr(sys, "frozen", False):
         return "standalone", None
 
@@ -246,6 +268,72 @@ def _build_package_command(
         return "pipx", ("pipx", "uninstall", package_name)
 
     return "pip", _pip_uninstall_command(executable, package_name, which=which)
+
+
+def _install_artifact_targets(
+    *,
+    executable: Path,
+    data_dir: Path,
+    platform_name: str,
+    which: Callable[[str], str | None],
+    remove_data: bool,
+    config_dir: Path,
+    cache_dir: Path,
+) -> list[UninstallPathTarget]:
+    if platform_name.startswith("win"):
+        return _windows_install_targets(
+            executable=executable,
+            remove_data=remove_data,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            cache_dir=cache_dir,
+        )
+
+    targets: list[UninstallPathTarget] = []
+    launcher = which("netorium")
+    if launcher is not None:
+        targets.append(UninstallPathTarget("CLI launcher", Path(launcher).expanduser()))
+
+    venv_dir = data_dir / "venv"
+    if venv_dir.exists() or _is_relative_to(executable, venv_dir):
+        targets.append(UninstallPathTarget("Python virtual environment", venv_dir))
+
+    if getattr(sys, "frozen", False) or not _is_relative_to(executable, venv_dir):
+        targets.append(UninstallPathTarget("Standalone executable", executable))
+
+    local_bin = Path.home() / ".local" / "bin" / "netorium"
+    if local_bin.exists():
+        targets.append(UninstallPathTarget("Local bin launcher", local_bin))
+
+    if remove_data:
+        targets.extend(
+            [
+                UninstallPathTarget("Configuration directory", config_dir),
+                UninstallPathTarget("Application data directory", data_dir),
+                UninstallPathTarget("Cache directory", cache_dir),
+            ]
+        )
+
+    return targets
+
+
+def _linux_deferred_remove_command(
+    targets: tuple[UninstallPathTarget, ...],
+    *,
+    launcher_path: Path | None = None,
+) -> tuple[str, ...]:
+    cleanup_parts = ["sleep 3", _linux_stop_netorium_processes_fragment()]
+    seen_paths: set[Path] = set()
+    if launcher_path is not None:
+        seen_paths.add(launcher_path.expanduser())
+        cleanup_parts.append(f"rm -f {shlex.quote(str(launcher_path))}")
+    for target in targets:
+        key = target.path.expanduser()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        cleanup_parts.append(f"rm -rf {shlex.quote(str(key))}")
+    return ("sh", "-c", "; ".join(cleanup_parts))
 
 
 def _windows_install_targets(
@@ -426,6 +514,7 @@ def _build_deferred_package_command(
     *,
     platform_name: str,
     launcher_path: Path | None = None,
+    extra_paths: tuple[Path, ...] = (),
 ) -> tuple[str, ...]:
     if platform_name.startswith("win"):
         package_command = format_command(command)
@@ -435,6 +524,19 @@ def _build_deferred_package_command(
         ps_launcher_cleanup = _launcher_cleanup_powershell_fragment(launcher_path)
         if ps_launcher_cleanup:
             body_parts.append(ps_launcher_cleanup)
+        seen_paths: set[Path] = set()
+        if launcher_path is not None:
+            seen_paths.add(launcher_path.expanduser())
+        for path in extra_paths:
+            key = path.expanduser()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            quoted = _powershell_single_quote(str(key))
+            body_parts.append(
+                f"if (Test-Path -LiteralPath {quoted}) "
+                f"{{ Remove-Item -LiteralPath {quoted} -Recurse -Force -ErrorAction SilentlyContinue }}"
+            )
         body = "; ".join(body_parts)
         return (
             "powershell.exe",
@@ -449,9 +551,18 @@ def _build_deferred_package_command(
         )
 
     launcher_cleanup = _launcher_cleanup_fragment(platform_name, launcher_path)
-    shell_parts = ["sleep 3", " ".join(shlex.quote(part) for part in command)]
+    shell_parts = ["sleep 3", _linux_stop_netorium_processes_fragment(), " ".join(shlex.quote(part) for part in command)]
     if launcher_cleanup:
         shell_parts.append(launcher_cleanup)
+    seen_paths: set[Path] = set()
+    if launcher_path is not None:
+        seen_paths.add(launcher_path.expanduser())
+    for path in extra_paths:
+        key = path.expanduser()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        shell_parts.append(f"rm -rf {shlex.quote(str(key))}")
     return ("sh", "-c", "; ".join(shell_parts))
 
 
@@ -493,6 +604,13 @@ def _resolve_launcher_path(which: Callable[[str], str | None]) -> Path | None:
     if launcher is None:
         return None
     return Path(launcher).expanduser()
+
+
+def _linux_stop_netorium_processes_fragment() -> str:
+    return (
+        "pkill -f '[n]etorium agent run-loop' >/dev/null 2>&1 || true; "
+        "pkill -f '[n]etorium controller run' >/dev/null 2>&1 || true"
+    )
 
 
 def _launcher_cleanup_fragment(platform_name: str, launcher_path: Path | None) -> str:

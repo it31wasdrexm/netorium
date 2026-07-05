@@ -24,7 +24,7 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 service_app = typer.Typer(
-    help="Manage the local endpoint agent service.",
+    help="Manage the local endpoint agent background service.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -73,14 +73,20 @@ def enroll(
     table.add_row("State", str(state.state_path))
     console.print(table)
 
-    background_message = try_provision_agent_background_service()
-    if background_message is not None:
-        console.print(background_message)
-    else:
-        console.print(
-            "Background service was not installed automatically. "
-            "Make sure you have administrator/root privileges."
-        )
+    try:
+        background_message = try_provision_agent_background_service()
+    except AgentError as exc:
+        _fail(exc)
+    console.print(background_message)
+
+    try:
+        result = run_agent_once()
+    except AgentError as exc:
+        _fail(exc)
+    if result.command_results:
+        console.print(result.message)
+        for command_result in result.command_results:
+            console.print(f"{command_result.command_id}: {command_result.status} - {command_result.message}")
 
 
 @app.command()
@@ -131,7 +137,7 @@ def run_loop(
     interval: Annotated[
         float,
         typer.Option("--interval", help="Heartbeat interval in seconds."),
-    ] = 5.0,
+    ] = 2.0,
 ) -> None:
     """Run the agent heartbeat loop continuously (used by background service)."""
     try:
@@ -148,14 +154,6 @@ def update_check() -> None:
 
 
 app.add_typer(update_app, name="update")
-
-@service_app.command("install")
-def service_install() -> None:
-    """Install the agent background service."""
-    try:
-        console.print(service_action("install"))
-    except AgentError as exc:
-        _fail(exc)
 
 @service_app.command("start")
 def service_start() -> None:

@@ -68,6 +68,7 @@ def apply_site_policy(
     domains = _hosts_domains(domain)
     start_marker = f"# NETORIUM BLOCK START {domain}"
     end_marker = f"# NETORIUM BLOCK END {domain}"
+    rule_name = _rule_name("Site", domain)
 
     try:
         current = active_hosts_path.read_text(encoding="utf-8", errors="ignore")
@@ -77,11 +78,12 @@ def apply_site_policy(
     updated = _remove_marked_block(current, start_marker, end_marker)
     if action == "block":
         lines = [start_marker, f"# Reason: {reason}"]
-        lines.extend(f"127.0.0.1 {blocked_domain}" for blocked_domain in domains)
+        lines.extend(_hosts_block_lines(domains))
         lines.append(end_marker)
         updated = updated.rstrip() + "\n" + "\n".join(lines) + "\n"
+        firewall_script = _site_firewall_block_script(rule_name, domains, reason)
     elif action == "unblock":
-        pass
+        firewall_script = _site_firewall_unblock_script(rule_name)
     else:
         raise EndpointPolicyError("Site policy action must be block or unblock.")
 
@@ -90,10 +92,8 @@ def apply_site_policy(
     except OSError as exc:
         raise EndpointPolicyError(f"Could not write hosts file {active_hosts_path}: {exc}") from exc
 
-    _run_powershell(
-        "Clear-DnsClientCache -ErrorAction SilentlyContinue; "
-        "ipconfig /flushdns | Out-Null"
-    )
+    _run_powershell(firewall_script)
+    _run_powershell(_site_dns_flush_script())
     return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
 
 
@@ -223,7 +223,54 @@ def _hosts_domains(domain: str) -> list[str]:
     clean_domain = domain[2:] if domain.startswith("*.") else domain
     if clean_domain.startswith("www."):
         clean_domain = clean_domain[4:]
-    return sorted({clean_domain, f"www.{clean_domain}"})
+    return sorted({clean_domain, f"www.{clean_domain}", f"m.{clean_domain}"})
+
+
+def _hosts_block_lines(domains: list[str]) -> list[str]:
+    lines: list[str] = []
+    for blocked_domain in domains:
+        for ip_address in ("0.0.0.0", "127.0.0.1", "::1"):
+            lines.append(f"{ip_address} {blocked_domain}")
+    return lines
+
+
+def _site_firewall_block_script(rule_name: str, domains: list[str], reason: str) -> str:
+    parts = [
+        f"$Reason = {_ps_quote(reason)};",
+        f"Get-NetFirewallRule -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.DisplayName -like {_ps_quote(f'{rule_name}%')} }} | "
+        "Remove-NetFirewallRule -ErrorAction SilentlyContinue;",
+    ]
+    for index, blocked_domain in enumerate(domains):
+        display_name = f"{rule_name} {index + 1}"[:120]
+        parts.append(
+            "New-NetFirewallRule "
+            f"-DisplayName {_ps_quote(display_name)} "
+            "-Direction Outbound "
+            "-Action Block "
+            "-Profile Any "
+            f"-RemoteFqdn {_ps_quote(blocked_domain)} "
+            f"-Description $Reason "
+            "-ErrorAction Stop | Out-Null"
+        )
+    return " ".join(parts)
+
+
+def _site_firewall_unblock_script(rule_name: str) -> str:
+    return (
+        f"Get-NetFirewallRule -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.DisplayName -like {_ps_quote(f'{rule_name}%')} }} | "
+        "Remove-NetFirewallRule -ErrorAction SilentlyContinue"
+    )
+
+
+def _site_dns_flush_script() -> str:
+    return (
+        "Stop-Service -Name Dnscache -Force -ErrorAction SilentlyContinue; "
+        "Start-Service -Name Dnscache -ErrorAction SilentlyContinue; "
+        "Clear-DnsClientCache -ErrorAction SilentlyContinue; "
+        "ipconfig /flushdns | Out-Null"
+    )
 
 
 def _looks_like_executable_path(executable: str) -> bool:

@@ -459,6 +459,7 @@ def _install_windows_nssm(nssm: str, executable: str, host: str, port: int) -> s
     _run([nssm, "install", svc, executable,
           "controller", "start", "--host", host, "--port", str(port), "--quiet"])
     _run([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
+    _run([nssm, "set", svc, "AppNoConsole", "1"])
     _run([nssm, "set", svc, "AppDirectory", str(Path(executable).parent)])
     
     env_args = []

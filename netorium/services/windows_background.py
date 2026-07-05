@@ -2,14 +2,43 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
-
-from netorium.services.windows_service import format_sc_binpath
 
 
 def format_task_command(executable: str, args: Sequence[str]) -> str:
     """Format a scheduled-task action string for ``schtasks /TR``."""
-    return format_sc_binpath(executable, args)
+    return format_hidden_task_command(executable, args)
+
+
+def format_hidden_task_command(executable: str, args: Sequence[str]) -> str:
+    """Launch a background task without showing a console window."""
+    ps_executable = _powershell_single_quote(executable)
+    if args:
+        ps_args = ",".join(_powershell_single_quote(arg) for arg in args)
+        command = (
+            f"Start-Process -FilePath {ps_executable} "
+            f"-ArgumentList @({ps_args}) -WindowStyle Hidden"
+        )
+    else:
+        command = f"Start-Process -FilePath {ps_executable} -WindowStyle Hidden"
+    return subprocess.list2cmdline(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ]
+    )
+
+
+def _powershell_single_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def build_schtasks_create_command(
@@ -31,7 +60,6 @@ def build_schtasks_create_command(
         schedule,
         "/RL",
         "HIGHEST",
-        "/IT",
         "/F",
     ]
 

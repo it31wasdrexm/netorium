@@ -203,7 +203,7 @@ def execute_uninstall_plan(
 
 
 def format_command(command: tuple[str, ...]) -> str:
-    if command and command[0] == "windows-batch-cleanup":
+    if command and command[0] in {"windows-batch-cleanup", "windows-powershell-cleanup"}:
         return "Windows cleanup script"
     return " ".join(_quote_display_part(part) for part in command)
 
@@ -262,6 +262,9 @@ def _windows_install_targets(
             UninstallPathTarget("Application data directory", data_dir),
             UninstallPathTarget("Cache directory", cache_dir),
         ]
+        programdata_dir = _windows_programdata_dir()
+        if programdata_dir is not None:
+            targets.append(UninstallPathTarget("Windows service logs directory", programdata_dir))
         if not _is_relative_to(executable, data_dir):
             targets.append(UninstallPathTarget("Standalone executable", executable))
         return targets
@@ -274,6 +277,13 @@ def _windows_install_targets(
         UninstallPathTarget("Standalone executable", executable),
         UninstallPathTarget("Standalone bin directory", executable.parent),
     ]
+
+
+def _windows_programdata_dir() -> Path | None:
+    programdata = os.environ.get("ProgramData")
+    if not programdata:
+        return None
+    return Path(programdata) / "Netorium"
 
 
 def _windows_local_install_targets(
@@ -327,46 +337,71 @@ def _windows_deferred_remove_command(
     bin_dir: Path | None = None,
     executable: Path | None = None,
 ) -> tuple[str, ...] | None:
-    cleanup_lines = _windows_cleanup_script_lines(
+    cleanup_script = _windows_cleanup_powershell_script(
         targets,
         bin_dir=bin_dir,
         executable=executable,
     )
-    if not cleanup_lines:
+    if not cleanup_script:
         return None
 
-    return ("windows-batch-cleanup", *cleanup_lines)
+    return ("windows-powershell-cleanup", cleanup_script)
 
 
-def _windows_cleanup_script_lines(
+def _windows_cleanup_powershell_script(
     targets: tuple[UninstallPathTarget, ...],
     *,
     bin_dir: Path | None = None,
     executable: Path | None = None,
-) -> list[str]:
-    commands = [
-        "sc stop NetoriumController >nul 2>nul",
-        "sc stop NetoriumAgent >nul 2>nul",
-        "taskkill /IM nssm.exe /F >nul 2>nul",
-        "taskkill /IM netorium.exe /F >nul 2>nul",
-        "taskkill /IM netorium-agent.exe /F >nul 2>nul",
-        "timeout /t 5 /nobreak >nul 2>nul",
-    ]
-
+) -> str:
     removal_paths: list[Path] = []
     if executable is not None:
         removal_paths.append(executable)
     if bin_dir is not None:
         removal_paths.append(bin_dir / "netorium.exe")
+        removal_paths.append(bin_dir / "nssm.exe")
+        removal_paths.append(bin_dir / "netorium.cmd")
         removal_paths.append(bin_dir)
     removal_paths.extend(target.path for target in targets)
-    for path in _sort_windows_removal_paths(removal_paths):
-        commands.extend(_windows_remove_path_commands(path))
+    sorted_paths = _sort_windows_removal_paths(removal_paths)
+    if not sorted_paths and bin_dir is None:
+        return ""
 
+    path_literals = ",".join(_powershell_single_quote(_windows_path_text(path)) for path in sorted_paths)
+    lines = [
+        "$ErrorActionPreference = 'SilentlyContinue'",
+        "Get-Process -Name netorium,netorium-agent,nssm -ErrorAction SilentlyContinue | "
+        "Stop-Process -Force -ErrorAction SilentlyContinue",
+        "sc.exe stop NetoriumController | Out-Null",
+        "sc.exe stop NetoriumAgent | Out-Null",
+        "schtasks /End /TN NetoriumController | Out-Null",
+        "schtasks /End /TN NetoriumAgent | Out-Null",
+        "Start-Sleep -Seconds 2",
+        f"$Paths = @({path_literals})",
+        "for ($retry = 1; $retry -le 3; $retry++) {",
+        "  foreach ($target in $Paths) {",
+        "    if (Test-Path -LiteralPath $target) {",
+        "      Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue",
+        "    }",
+        "  }",
+        "  Start-Sleep -Seconds 2",
+        "}",
+    ]
     if bin_dir is not None:
-        commands.extend(_windows_remove_path_entry_commands(bin_dir))
-
-    return commands
+        entry = _powershell_single_quote(_windows_path_text(bin_dir).rstrip("\\/"))
+        lines.extend(
+            [
+                f"$Entry = {entry}",
+                "$UserPath = [Environment]::GetEnvironmentVariable('Path','User')",
+                "if ($UserPath) {",
+                "$Parts = $UserPath -split ';' | Where-Object {",
+                "$_.TrimEnd('\\') -ine $Entry.TrimEnd('\\') -and $_.Trim() -ne ''",
+                "}",
+                "[Environment]::SetEnvironmentVariable('Path', ($Parts -join ';'), 'User')",
+                "}",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def _sort_windows_removal_paths(paths: list[Path]) -> list[Path]:
@@ -386,52 +421,34 @@ def _sort_windows_removal_paths(paths: list[Path]) -> list[Path]:
     )
 
 
-def _windows_remove_path_commands(path: Path) -> list[str]:
-    quoted_path = _cmd_quote(path)
-    quoted_dir_probe = _cmd_quote_string(f"{_windows_path_text(path)}\\NUL")
-    return [
-        f"if exist {quoted_dir_probe} ( rmdir /s /q {quoted_path} >nul 2>nul )",
-        f"if exist {quoted_path} ( del /f /q {quoted_path} >nul 2>nul )",
-    ]
-
-
-def _windows_remove_path_entry_commands(path_entry: Path) -> list[str]:
-    normalized = _windows_path_text(path_entry).rstrip("\\/")
-    if not normalized:
-        return []
-
-    quoted = _powershell_single_quote(normalized)
-    return [
-        (
-            "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-            f"\"$entry={quoted}; "
-            "$path=[Environment]::GetEnvironmentVariable('Path','User'); "
-            "if ($path) { "
-            "$parts=$path -split ';' | Where-Object { "
-            "$_.TrimEnd('\\') -ine $entry.TrimEnd('\\') -and $_.Trim() -ne '' "
-            "}; "
-            "[Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User') "
-            "}\" >nul 2>nul"
-        ),
-    ]
-
-
 def _build_deferred_package_command(
     command: tuple[str, ...],
     *,
     platform_name: str,
     launcher_path: Path | None = None,
 ) -> tuple[str, ...]:
-    launcher_cleanup = _launcher_cleanup_fragment(platform_name, launcher_path)
     if platform_name.startswith("win"):
         package_command = format_command(command)
-        body = "timeout /t 3 /nobreak >nul"
-        if package_command:
-            body = f"{body} & {package_command}"
-        if launcher_cleanup:
-            body = f"{body} & {launcher_cleanup}"
-        return ("cmd.exe", "/d", "/c", body)
+        body_parts = ["Start-Sleep -Seconds 3"]
+        if package_command and command[0] not in {"windows-powershell-cleanup", "windows-batch-cleanup"}:
+            body_parts.append(f"& {package_command}")
+        ps_launcher_cleanup = _launcher_cleanup_powershell_fragment(launcher_path)
+        if ps_launcher_cleanup:
+            body_parts.append(ps_launcher_cleanup)
+        body = "; ".join(body_parts)
+        return (
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            body,
+        )
 
+    launcher_cleanup = _launcher_cleanup_fragment(platform_name, launcher_path)
     shell_parts = ["sleep 3", " ".join(shlex.quote(part) for part in command)]
     if launcher_cleanup:
         shell_parts.append(launcher_cleanup)
@@ -487,6 +504,16 @@ def _launcher_cleanup_fragment(platform_name: str, launcher_path: Path | None) -
     return f"rm -f {shlex.quote(str(launcher_path))}"
 
 
+def _launcher_cleanup_powershell_fragment(launcher_path: Path | None) -> str:
+    if launcher_path is None:
+        return ""
+    quoted = _powershell_single_quote(str(launcher_path))
+    return (
+        f"if (Test-Path -LiteralPath {quoted}) "
+        f"{{ Remove-Item -LiteralPath {quoted} -Force -ErrorAction SilentlyContinue }}"
+    )
+
+
 def _read_configured_database_path(config_path: Path) -> Path | None:
     try:
         data = read_config_data(config_path)
@@ -508,10 +535,7 @@ def _database_target(database_path: Path | None, data_dir: Path) -> UninstallPat
     if database_path is None or _is_relative_to(database_path, data_dir):
         return None
 
-    if database_path.name == "netorium.db" and database_path.parent.name.lower() == "netorium":
-        return UninstallPathTarget("Configured database file", database_path)
-
-    return None
+    return UninstallPathTarget("Configured database file", database_path)
 
 
 def _dedupe_targets(targets: list[UninstallPathTarget]) -> tuple[UninstallPathTarget, ...]:
@@ -573,57 +597,56 @@ def _run_command_detached(args: tuple[str, ...]) -> int:
 
 def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
     launch_args: tuple[str, ...]
-    if len(args) >= 1 and args[0] == "windows-batch-cleanup":
+    if len(args) >= 2 and args[0] == "windows-powershell-cleanup":
+        cleanup_body = args[1]
+        parent_pid = os.getpid()
+        script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.ps1"
+        script_lines = [
+            "$ErrorActionPreference = 'SilentlyContinue'",
+            f"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue",
+            "Start-Sleep -Seconds 2",
+            "Get-Process -Name netorium,netorium-agent,nssm -ErrorAction SilentlyContinue | "
+            "Stop-Process -Force -ErrorAction SilentlyContinue",
+            "Start-Sleep -Seconds 1",
+            cleanup_body,
+            "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
+        ]
+        script_path.write_text("\n".join(script_lines), encoding="utf-8")
+        launch_args = (
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+        )
+    elif len(args) >= 1 and args[0] == "windows-batch-cleanup":
         cleanup_lines = args[1:]
         cleanup_body = "\n".join(cleanup_lines)
         parent_pid = os.getpid()
-        script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.cmd"
-
-        # For frozen executables (PyInstaller), the inner Python PID differs
-        # from the outer netorium.exe wrapper. We must wait for both and also
-        # wait by image name as a fallback.
-        wait_lines = [
-            (
-                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-                f"\"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue; "
-                "Start-Sleep -Seconds 2; "
-                "$p = Get-Process -Name netorium -ErrorAction SilentlyContinue; "
-                "if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; "
-                "Start-Sleep -Seconds 3 }\" "
-                ">nul 2>nul"
-            ),
-        ]
-
-        # Retry deletion up to 3 times with delays to handle lingering locks
-        retry_block = (
-            'set "RETRY=0"\n'
-            ':RETRY_LOOP\n'
-            f'{cleanup_body}\n'
-            'set /a RETRY+=1\n'
-            'if %RETRY% GEQ 3 goto RETRY_DONE\n'
-        )
-        # Check if the main exe still exists; if not we are done
-        if '\n'.join(cleanup_lines).find('netorium.exe') != -1:
-            retry_block += (
-                'timeout /t 3 /nobreak >nul 2>nul\n'
-                'goto RETRY_LOOP\n'
-            )
-        else:
-            retry_block += (
-                'timeout /t 3 /nobreak >nul 2>nul\n'
-                'goto RETRY_LOOP\n'
-            )
-        retry_block += ':RETRY_DONE'
-
+        script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.ps1"
         script_lines = [
-            "@echo off",
-            "setlocal",
-            *wait_lines,
-            retry_block,
-            'del /f /q "%~f0" >nul 2>nul',
+            "$ErrorActionPreference = 'SilentlyContinue'",
+            f"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue",
+            "Start-Sleep -Seconds 2",
+            cleanup_body,
+            "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
         ]
-        script_path.write_text("\r\n".join(script_lines), encoding="utf-8")
-        launch_args = ("cmd.exe", "/d", "/c", str(script_path))
+        script_path.write_text("\n".join(script_lines), encoding="utf-8")
+        launch_args = (
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+        )
     else:
         launch_args = args
 
@@ -635,7 +658,8 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
             stderr=subprocess.DEVNULL,
             close_fds=True,
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0),
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except FileNotFoundError as exc:
         raise UninstallError(

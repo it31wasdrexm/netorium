@@ -11,6 +11,7 @@ from rich.table import Table
 from rich.text import Text
 from typer.main import get_command
 from rich.align import Align
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from netorium.cli.branding import (
     render_logo_panel,
@@ -329,8 +330,8 @@ def uninstall(
 
         if remove_data is None:
             remove_data = typer.confirm(
-                "Remove Netorium config, database, and cache too?",
-                default=False,
+                "Remove Netorium config, database, cache, and PATH entry too?",
+                default=True,
             )
 
     # Clean up services completely on both Windows and Linux before actual deletion
@@ -365,7 +366,19 @@ def _execute_uninstall(*, remove_data: bool, package_manager: str) -> None:
 
     _render_uninstall_plan(plan, dry_run=False)
     try:
-        result = execute_uninstall_plan(plan)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=32),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            steps = 1 + len(plan.path_targets) + (1 if plan.package_command is not None else 0)
+            task_id = progress.add_task("Uninstalling Netorium...", total=max(steps, 1))
+            result = execute_uninstall_plan(plan)
+            progress.update(task_id, completed=steps)
     except UninstallError as exc:
         _fail(exc)
 
@@ -427,25 +440,23 @@ def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
 def _render_uninstall_result(result: UninstallResult, *, plan: UninstallPlan) -> None:
     if result.package_command_ran:
         if plan.package_command_detached:
-            console.print("Package uninstall cleanup scheduled after Netorium exits.")
+            console.print("[green]✔[/green] Background cleanup scheduled (silent, no extra windows).")
             console.print("Wait a few seconds, then open a new terminal before checking `netorium` again.")
-            if plan.package_command is not None and not sys.platform.startswith("win"):
-                console.print(f"Scheduled command: {format_command(plan.package_command)}")
         else:
-            console.print("Package uninstall command completed.")
+            console.print("[green]✔[/green] Package uninstall command completed.")
     else:
         console.print("Package uninstall was skipped.")
 
     for path in result.removed_paths:
-        console.print(f"Removed: {path}")
+        console.print(f"[green]✔[/green] Removed: {path}")
 
     for path in result.skipped_paths:
-        console.print(f"Skipped missing path: {path}")
+        console.print(f"[dim]Skipped missing path:[/dim] {path}")
 
     for path in result.deferred_paths:
-        console.print(f"Scheduled after exit: {path}")
+        console.print(f"[cyan]Scheduled after exit:[/cyan] {path}")
 
-    console.print("Netorium uninstall completed.")
+    console.print("[bold green]Netorium uninstall completed.[/bold green]")
 
 
 def _normalize_dash_arg(arg: str) -> str:

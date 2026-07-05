@@ -481,6 +481,13 @@ def _windows_service_action(action: str) -> str:
             _run_service_cmd_optional([nssm, "remove", svc, "confirm"])
             _run_service_cmd([nssm, "install", svc, executable, *agent_args])
             _run_service_cmd([nssm, "set", svc, "Start", "SERVICE_AUTO_START"])
+            _run_service_cmd([nssm, "set", svc, "AppNoConsole", "1"])
+            env_args = []
+            for var in ("USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOME"):
+                if val := os.environ.get(var):
+                    env_args.append(f"{var}={val}")
+            if env_args:
+                _run_service_cmd([nssm, "set", svc, "AppEnvironmentExtra", *env_args])
             _run_service_cmd([nssm, "set", svc, "AppStdout",
                               r"C:\ProgramData\Netorium\agent.log"])
             _run_service_cmd([nssm, "set", svc, "AppStderr",

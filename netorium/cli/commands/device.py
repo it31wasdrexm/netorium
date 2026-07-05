@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
+from netorium.cli.branding import make_kv_table, make_table
 
 from netorium.core.database import DatabaseError
 from netorium.core.settings import ConfigError, load_settings
@@ -60,10 +60,7 @@ def list_command() -> None:
         console.print("No devices found")
         return
 
-    table = Table(title="Devices")
-    table.add_column("IP")
-    table.add_column("Zone")
-    table.add_column("Hostname")
+    table = make_table("Devices", columns=("IP", "Zone", "Hostname"))
     for device in devices:
         table.add_row(device.ip_address, device.zone_name, _format_optional(device.hostname))
     console.print(table)
@@ -77,9 +74,7 @@ def show(ip_address: Annotated[str, typer.Argument(help="Device IP address.")]) 
     except (ConfigError, DatabaseError, DeviceNotFoundError, DeviceError) as exc:
         _fail(exc)
 
-    table = Table(title=f"Device: {device.ip_address}")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table(f"Device: {device.ip_address}")
     table.add_row("IP", device.ip_address)
     table.add_row("Zone", device.zone_name)
     table.add_row("Hostname", _format_optional(device.hostname))

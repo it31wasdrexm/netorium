@@ -5,20 +5,28 @@ import sys
 from typing import Annotated
 
 import typer
-from rich import box
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 from typer.main import get_command
 from rich.align import Align
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from netorium.cli.branding import (
+    make_kv_table,
+    make_table,
+    read_prompt,
+    render_farewell,
+    render_info_panel,
     render_logo_panel,
     render_notice_panel,
-    render_quickstart_panel,
-    render_status_line,
+    render_status_badges,
+    render_version_panel,
+    render_welcome_hint,
+    status_icon,
 )
+from netorium.cli.help_renderer import install_help_renderer
+
+install_help_renderer()
 
 from netorium.cli.agent import app as endpoint_agent_app
 from netorium.cli.commands.config import config_app
@@ -50,19 +58,14 @@ from netorium.services.uninstaller import (
 console = Console()
 error_console = Console(stderr=True)
 
-_HELP_EPILOG = (
-    "Quick start: netorium | netorium controller install-service | "
-    "netorium uninstall. Shell commands: help, controller status, exit."
-)
 _UNINSTALL_CONTEXT_SETTINGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
 app = typer.Typer(
     name="netorium",
     help=(
-        "[bold]Netorium[/] CLI for building-level network access control. "
+        "Netorium CLI for building-level network access control. "
         "Local controller, endpoint agents, policies, reports, and integrations."
     ),
-    epilog=_HELP_EPILOG,
     context_settings={"help_option_names": ["-h", "--help"]},
     no_args_is_help=False,
     rich_markup_mode="rich",
@@ -132,7 +135,7 @@ def _run_interactive_shell() -> None:
 
     while True:
         try:
-            line = input("netorium> ")
+            line = read_prompt(console)
         except (EOFError, KeyboardInterrupt):
             console.print()
             break
@@ -149,7 +152,8 @@ def _run_interactive_shell() -> None:
 
         _run_interactive_command(args)
 
-    console.print("Leaving Netorium.")
+    console.print()
+    console.print(render_farewell())
 
 
 def _run_interactive_sudo(args: list[str]) -> None:
@@ -177,23 +181,15 @@ def _run_interactive_sudo(args: list[str]) -> None:
 
 def _render_interactive_header() -> None:
     console.print()
-    console.print(render_logo_panel(subtitle="zero-trust network control", border_style="bright_cyan"))
-    console.print(render_status_line(
+    console.print(render_logo_panel(subtitle="zero-trust network control"))
+    console.print()
+    console.print(render_status_badges(
         version=get_version(),
         platform_name=platform.system() or "unknown",
         config_path=str(default_config_path()),
     ))
     console.print()
-    console.print(render_quickstart_panel())
-    console.print()
-    hint = Text.assemble(
-        ("Type ", "bright_black"),
-        ("help", "bold cyan"),
-        (" for all commands, ", "bright_black"),
-        ("exit", "bold cyan"),
-        (" to leave.", "bright_black"),
-    )
-    console.print(Align.center(hint))
+    console.print(Align.center(render_welcome_hint()))
     console.print()
 
 
@@ -202,32 +198,20 @@ def _render_startup_update_notice() -> None:
     if notice is None:
         return
 
-    from rich.panel import Panel
-    
     platform_info = notice.platform
-    body = Table.grid(padding=(0, 2))
-    body.add_column(style="magenta", justify="right")
-    body.add_column()
-    
-    body.add_row("Platform", platform_info.platform_name)
-    body.add_row("Install", f"[bold bright_cyan]{platform_info.install_command}[/]")
+    rows: list[tuple[str, str]] = [
+        ("Platform", platform_info.platform_name),
+        ("Install", f"[bold bright_cyan]{platform_info.install_command}[/]"),
+    ]
     if platform_info.standalone_command:
-        body.add_row("Standalone", f"[bright_black]{platform_info.standalone_command}[/]")
-    body.add_row("Release", f"[underline blue]{notice.info.release_url}[/]")
-    
-    title = Text.assemble(
-        ("Update available: ", "bold white"),
-        (notice.info.current_version, "bright_black"),
-        (" -> ", "bright_black"),
-        (notice.info.latest_version, "bold bright_green"),
+        rows.append(("Standalone", f"[bright_black]{platform_info.standalone_command}[/]"))
+    rows.append(("Release", f"[underline blue]{notice.info.release_url}[/]"))
+
+    title = (
+        f"Update available: {notice.info.current_version} "
+        f"→ {notice.info.latest_version}"
     )
-    
-    console.print(Panel(
-        Align.center(body),
-        title=title,
-        border_style="bright_cyan",
-        padding=(1, 2),
-    ))
+    console.print(render_info_panel(title, tuple(rows)))
 
 
 @app.callback(invoke_without_command=True)
@@ -240,7 +224,7 @@ def main(ctx: typer.Context) -> None:
 @app.command(rich_help_panel="Essentials")
 def version() -> None:
     """Show the installed Netorium CLI version."""
-    console.print(f"{APP_NAME} {get_version()}")
+    console.print(render_version_panel(get_version(), title=APP_NAME))
 
 
 @app.command(rich_help_panel="Essentials")
@@ -252,14 +236,13 @@ def doctor(
 ) -> None:
     """Run basic local environment checks."""
     config_path = default_config_path()
-    table = Table(title="Netorium Doctor")
-    table.add_column("Check")
-    table.add_column("Result")
-    table.add_row("CLI", "OK")
+    config_exists = config_path.exists()
+    table = make_kv_table("Netorium Doctor")
+    table.add_row("CLI", f"{status_icon(True)} OK")
     table.add_row("Version", get_version())
     table.add_row("Platform", platform.system() or "unknown")
     table.add_row("Config path", str(config_path))
-    table.add_row("Config file", "found" if config_path.exists() else "missing")
+    table.add_row("Config file", f"{status_icon(config_exists)} {'found' if config_exists else 'missing'}")
     console.print(table)
     if verbose:
         console.print("Run `netorium config validate` to validate the active configuration.")
@@ -392,15 +375,7 @@ def _execute_uninstall(*, remove_data: bool, package_manager: str) -> None:
 
 
 def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
-    table = Table(
-        title="Uninstall Plan",
-        box=box.ROUNDED,
-        show_header=True,
-        header_style="bold bright_cyan",
-        border_style="bright_black",
-    )
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Uninstall Plan")
     table.add_row("Mode", "preview" if dry_run else "confirmed")
     table.add_row("Package", plan.package_name)
     table.add_row("Package manager", plan.package_manager)
@@ -413,10 +388,7 @@ def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
     console.print(table)
 
     if plan.path_targets:
-        targets_table = Table(title="Data Targets", box=box.SIMPLE)
-        targets_table.add_column("Target")
-        targets_table.add_column("Path")
-        targets_table.add_column("Exists")
+        targets_table = make_table("Data Targets", columns=("Target", "Path", "Exists"))
         for target in plan.path_targets:
             targets_table.add_row(
                 target.label,
@@ -426,10 +398,7 @@ def _render_uninstall_plan(plan: UninstallPlan, *, dry_run: bool) -> None:
         console.print(targets_table)
 
     if plan.deferred_path_targets:
-        deferred_table = Table(title="Scheduled Cleanup Targets", box=box.SIMPLE)
-        deferred_table.add_column("Target")
-        deferred_table.add_column("Path")
-        deferred_table.add_column("Timing")
+        deferred_table = make_table("Scheduled Cleanup Targets", columns=("Target", "Path", "Timing"))
         for target in plan.deferred_path_targets:
             deferred_table.add_row(target.label, str(target.path), "after exit")
         console.print(deferred_table)

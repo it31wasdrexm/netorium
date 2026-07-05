@@ -1,9 +1,8 @@
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
-from netorium.cli.branding import render_notice_panel
+from netorium.cli.branding import make_kv_table, make_table, render_notice_panel
 
 from netorium.core.metadata import get_version
 from netorium.core.settings import ConfigError, load_settings
@@ -65,9 +64,7 @@ def show() -> None:
     """Show update details and manual install commands."""
     info, error = _try_update_check()
 
-    table = Table(title="Netorium Update")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Netorium Update")
     table.add_row("Current version", info.current_version if info else get_version())
     table.add_row("Latest version", info.latest_version if info else "unknown")
     table.add_row("Source", info.source if info else "github")
@@ -172,9 +169,7 @@ def _render_update_error(exc: Exception) -> None:
 
 
 def _render_download_instructions(instructions: DownloadInstructions) -> None:
-    table = Table(title="Download Options")
-    table.add_column("Option")
-    table.add_column("Command or file")
+    table = make_table("Download Options", columns=("Option", "Command or file"))
     table.add_row("GitHub releases", instructions.release_url)
     table.add_row("Linux/macOS installer", instructions.linux_macos_installer)
     table.add_row("Windows PowerShell", instructions.windows_installer)

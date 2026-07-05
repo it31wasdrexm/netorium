@@ -4,7 +4,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
+from netorium.cli.branding import make_kv_table, make_table
 
 from netorium.core.metadata import APP_NAME, get_version
 from netorium.services.agent import (
@@ -63,9 +63,7 @@ def enroll(
         _fail(exc)
 
     console.print("Netorium Agent enrolled.")
-    table = Table(title="Netorium Agent")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Netorium Agent")
     table.add_row("Controller", state.controller_url)
     table.add_row("Agent ID", state.agent_id)
     table.add_row("Hostname", state.hostname)
@@ -93,9 +91,7 @@ def enroll(
 def status() -> None:
     """Show local agent enrollment status."""
     agent_status = get_agent_status()
-    table = Table(title="Netorium Agent")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Netorium Agent")
     table.add_row("Enrolled", "yes" if agent_status.enrolled else "no")
     table.add_row("State", str(agent_status.state_path))
 

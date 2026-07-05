@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
+from netorium.cli.branding import make_kv_table, make_table
 
 from netorium.core.database import DatabaseError
 from netorium.core.settings import ConfigError, load_settings
@@ -68,11 +68,7 @@ def list_command() -> None:
         console.print("No zones found")
         return
 
-    table = Table(title="Zones")
-    table.add_column("Name")
-    table.add_column("Floor")
-    table.add_column("Department")
-    table.add_column("Description")
+    table = make_table("Zones", columns=("Name", "Floor", "Department", "Description"))
     for zone in zones:
         table.add_row(
             zone.name,
@@ -91,9 +87,7 @@ def show(name: Annotated[str, typer.Argument(help="Zone name.")]) -> None:
     except (ConfigError, DatabaseError, ZoneError) as exc:
         _fail(exc)
 
-    table = Table(title=f"Zone: {zone.name}")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table(f"Zone: {zone.name}")
     table.add_row("Name", zone.name)
     table.add_row("Floor", _format_optional(zone.floor))
     table.add_row("Department", _format_optional(zone.department))

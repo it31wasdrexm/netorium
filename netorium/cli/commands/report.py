@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 import typer
 from rich.console import Console
-from rich.table import Table
+from netorium.cli.branding import ColumnSpec, make_table
 
 from netorium.core.settings import ConfigError, load_settings
 from netorium.services.traffic_monitor import (
@@ -53,13 +53,17 @@ def report_traffic(
         return
 
     threshold_bytes = max(threshold, 1) * 1024 * 1024
-    table = Table(title=f"Traffic Usage ({window} min window)")
-    table.add_column("Agent")
-    table.add_column("Hostname")
-    table.add_column("Download", justify="right")
-    table.add_column("Upload", justify="right")
-    table.add_column("Total", justify="right")
-    table.add_column("Window")
+    table = make_table(
+        f"Traffic Usage ({window} min window)",
+        columns=(
+            "Agent",
+            "Hostname",
+            ColumnSpec("Download", justify="right"),
+            ColumnSpec("Upload", justify="right"),
+            ColumnSpec("Total", justify="right"),
+            "Window",
+        ),
+    )
 
     for row in rows:
         total_style = "bold red" if row.total_bytes >= threshold_bytes else ""
@@ -102,12 +106,16 @@ def report_anomalies(
         console.print(f"No anomalies detected above {threshold} MB in the last {window} minutes.")
         return
 
-    table = Table(title="Traffic Anomalies")
-    table.add_column("Agent")
-    table.add_column("Hostname")
-    table.add_column("Total", justify="right")
-    table.add_column("Threshold", justify="right")
-    table.add_column("Window")
+    table = make_table(
+        "Traffic Anomalies",
+        columns=(
+            "Agent",
+            "Hostname",
+            ColumnSpec("Total", justify="right"),
+            ColumnSpec("Threshold", justify="right"),
+            "Window",
+        ),
+    )
     for anomaly in anomalies:
         table.add_row(
             anomaly.agent_id,

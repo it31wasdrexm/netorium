@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
+from netorium.cli.branding import make_kv_table, make_table
 
 from netorium.core.database import DatabaseError
 from netorium.core.settings import ConfigError, load_settings
@@ -105,9 +105,7 @@ def status() -> None:
     except (ConfigError, DatabaseError, ControllerError) as exc:
         _fail(exc)
 
-    table = Table(title="Netorium Controller")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Netorium Controller")
     table.add_row("Initialized", "yes" if controller_status.initialized else "no")
     table.add_row("Listen URL", controller_status.listen_url or "-")
     table.add_row("Enrollment URL", controller_status.enrollment_url or "-")
@@ -189,9 +187,7 @@ def token_create(
         _fail(exc)
 
     console.print("Enrollment token created.")
-    table = Table(title="Enrollment Token")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Enrollment Token")
     table.add_row("Token ID", token.token_id)
     table.add_row("Purpose", token.purpose)
     table.add_row("Zone", token.zone or "(all zones)")
@@ -214,12 +210,10 @@ def agent_list() -> None:
         console.print("No agents enrolled")
         return
 
-    table = Table(title="Netorium Agents")
-    table.add_column("Agent ID")
-    table.add_column("Hostname")
-    table.add_column("Zone")
-    table.add_column("Enrolled")
-    table.add_column("Last seen")
+    table = make_table(
+        "Netorium Agents",
+        columns=("Agent ID", "Hostname", "Zone", "Enrolled", "Last seen"),
+    )
     for agent in agents:
         table.add_row(
             agent.agent_id,
@@ -415,13 +409,10 @@ def agent_command_list(
         console.print("No agent commands")
         return
 
-    table = Table(title="Agent Commands")
-    table.add_column("Command ID")
-    table.add_column("Agent ID")
-    table.add_column("Type")
-    table.add_column("Status")
-    table.add_column("Payload")
-    table.add_column("Result")
+    table = make_table(
+        "Agent Commands",
+        columns=("Command ID", "Agent ID", "Type", "Status", "Payload", "Result"),
+    )
     for command in commands:
         table.add_row(
             command.command_id,
@@ -636,9 +627,7 @@ def _render_config(
     enrollment_url: str | None,
     active_tokens: int,
 ) -> None:
-    table = Table(title="Netorium Controller")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Netorium Controller")
     table.add_row("Listen", f"http://{host}:{port}")
     table.add_row("Enrollment URL", enrollment_url or "-")
     table.add_row("Active enrollment tokens", str(active_tokens))
@@ -670,9 +659,7 @@ def _policy_action(unblock: bool) -> str:
 
 def _render_agent_command(command: AgentCommandRecord) -> None:
     console.print("Endpoint command queued.")
-    table = Table(title="Agent Command")
-    table.add_column("Field")
-    table.add_column("Value")
+    table = make_kv_table("Agent Command")
     table.add_row("Command ID", command.command_id)
     table.add_row("Agent ID", command.agent_id)
     table.add_row("Type", command.command_type)
@@ -688,12 +675,10 @@ def _render_agent_commands(result: BatchAgentCommandResult) -> None:
         return
 
     console.print(f"Queued {count} endpoint command(s) for {len(result.targets)} agent(s).")
-    table = Table(title="Agent Commands")
-    table.add_column("Command ID")
-    table.add_column("Agent ID")
-    table.add_column("Type")
-    table.add_column("Status")
-    table.add_column("Payload")
+    table = make_table(
+        "Agent Commands",
+        columns=("Command ID", "Agent ID", "Type", "Status", "Payload"),
+    )
     for command in result.commands:
         table.add_row(
             command.command_id,

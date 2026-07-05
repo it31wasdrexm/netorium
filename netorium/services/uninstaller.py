@@ -8,12 +8,17 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Protocol, cast
 
 from netorium.core.platform import user_cache_dir, user_config_path, user_data_dir
 from netorium.core.settings import ConfigError, read_config_data
+from netorium.services.windows_background import (
+    build_schtasks_delete_command,
+    build_schtasks_run_command,
+)
 DEFAULT_PACKAGE_NAME = "netorium-cli"
 
 PackageManager = Literal["auto", "pipx", "pip", "standalone", "none"]
@@ -96,11 +101,17 @@ def build_uninstall_plan(
     deferred_path_targets: tuple[UninstallPathTarget, ...] = ()
     external_database_path: Path | None = None
     if remove_data:
-        targets = [
-            UninstallPathTarget("Configuration directory", config_path.parent),
-            UninstallPathTarget("Application data directory", data_dir),
-            UninstallPathTarget("Cache directory", cache_dir),
-        ]
+        if active_platform.startswith("win"):
+            targets = [
+                UninstallPathTarget("Configuration directory", config_path.parent),
+                UninstallPathTarget("Application data directory", data_dir),
+            ]
+        else:
+            targets = [
+                UninstallPathTarget("Configuration directory", config_path.parent),
+                UninstallPathTarget("Application data directory", data_dir),
+                UninstallPathTarget("Cache directory", cache_dir),
+            ]
         database_target = _database_target(configured_database_path, data_dir)
         if database_target is not None:
             targets.append(database_target)
@@ -109,7 +120,7 @@ def build_uninstall_plan(
         ):
             external_database_path = configured_database_path
 
-        path_targets = _dedupe_targets(targets)
+        path_targets = _dedupe_targets(_collapse_nested_path_targets(targets))
 
     install_artifact_targets = _install_artifact_targets(
         executable=executable_path,
@@ -348,14 +359,19 @@ def _windows_install_targets(
         targets = [
             UninstallPathTarget("Configuration directory", config_dir),
             UninstallPathTarget("Application data directory", data_dir),
-            UninstallPathTarget("Cache directory", cache_dir),
         ]
         programdata_dir = _windows_programdata_dir()
         if programdata_dir is not None:
             targets.append(UninstallPathTarget("Windows service logs directory", programdata_dir))
         if not _is_relative_to(executable, data_dir):
             targets.append(UninstallPathTarget("Standalone executable", executable))
-        return targets
+        bin_dir = data_dir / "bin"
+        if bin_dir.exists() or _is_relative_to(executable, bin_dir):
+            targets.append(UninstallPathTarget("Windows launcher directory", bin_dir))
+        venv_dir = data_dir / "venv"
+        if venv_dir.exists() or _is_relative_to(executable, venv_dir):
+            targets.append(UninstallPathTarget("Windows virtual environment", venv_dir))
+        return _collapse_nested_path_targets(targets)
 
     local_targets = _windows_local_install_targets(executable=executable, data_dir=data_dir)
     if local_targets:
@@ -460,19 +476,25 @@ def _windows_cleanup_powershell_script(
         "$ErrorActionPreference = 'SilentlyContinue'",
         "Get-Process -Name netorium,netorium-agent,nssm -ErrorAction SilentlyContinue | "
         "Stop-Process -Force -ErrorAction SilentlyContinue",
-        "sc.exe stop NetoriumController | Out-Null",
-        "sc.exe stop NetoriumAgent | Out-Null",
-        "schtasks /End /TN NetoriumController | Out-Null",
-        "schtasks /End /TN NetoriumAgent | Out-Null",
-        "Start-Sleep -Seconds 2",
+        "foreach ($svc in @('NetoriumController','NetoriumAgent')) {",
+        "  sc.exe stop $svc | Out-Null",
+        "  sc.exe delete $svc | Out-Null",
+        "}",
+        "foreach ($task in @('NetoriumController','NetoriumAgent')) {",
+        "  schtasks /End /TN $task 2>$null | Out-Null",
+        "  schtasks /Delete /TN $task /F 2>$null | Out-Null",
+        "}",
+        "netsh advfirewall firewall delete rule name=\"Netorium Controller\" 2>$null | Out-Null",
+        "netsh advfirewall firewall delete rule name=\"Netorium Controller App\" 2>$null | Out-Null",
+        "Start-Sleep -Seconds 3",
         f"$Paths = @({path_literals})",
-        "for ($retry = 1; $retry -le 3; $retry++) {",
+        "for ($retry = 1; $retry -le 6; $retry++) {",
         "  foreach ($target in $Paths) {",
         "    if (Test-Path -LiteralPath $target) {",
         "      Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue",
         "    }",
         "  }",
-        "  Start-Sleep -Seconds 2",
+        "  Start-Sleep -Seconds 3",
         "}",
     ]
     if bin_dir is not None:
@@ -714,60 +736,12 @@ def _run_command_detached(args: tuple[str, ...]) -> int:
 
 
 def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
-    launch_args: tuple[str, ...]
     if len(args) >= 2 and args[0] == "windows-powershell-cleanup":
-        cleanup_body = args[1]
-        parent_pid = os.getpid()
-        script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.ps1"
-        script_lines = [
-            "$ErrorActionPreference = 'SilentlyContinue'",
-            f"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue",
-            "Start-Sleep -Seconds 2",
-            "Get-Process -Name netorium,netorium-agent,nssm -ErrorAction SilentlyContinue | "
-            "Stop-Process -Force -ErrorAction SilentlyContinue",
-            "Start-Sleep -Seconds 1",
-            cleanup_body,
-            "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
-        ]
-        script_path.write_text("\n".join(script_lines), encoding="utf-8")
-        launch_args = (
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script_path),
-        )
-    elif len(args) >= 1 and args[0] == "windows-batch-cleanup":
-        cleanup_lines = args[1:]
-        cleanup_body = "\n".join(cleanup_lines)
-        parent_pid = os.getpid()
-        script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.ps1"
-        script_lines = [
-            "$ErrorActionPreference = 'SilentlyContinue'",
-            f"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue",
-            "Start-Sleep -Seconds 2",
-            cleanup_body,
-            "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
-        ]
-        script_path.write_text("\n".join(script_lines), encoding="utf-8")
-        launch_args = (
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script_path),
-        )
-    else:
-        launch_args = args
+        return _schedule_windows_powershell_cleanup(args[1])
+    if len(args) >= 1 and args[0] == "windows-batch-cleanup":
+        return _schedule_windows_powershell_cleanup("\n".join(args[1:]))
 
+    launch_args = args
     try:
         subprocess.Popen(
             launch_args,
@@ -775,15 +749,97 @@ def _run_windows_cleanup_detached(args: tuple[str, ...]) -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             close_fds=True,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=_windows_no_window_flags(),
         )
     except FileNotFoundError as exc:
         raise UninstallError(
             f"Command not found while scheduling uninstall cleanup: {launch_args[0]}"
         ) from exc
     return 0
+
+
+def _schedule_windows_powershell_cleanup(cleanup_body: str) -> int:
+    parent_pid = os.getpid()
+    task_name = f"NetoriumUninstall-{uuid.uuid4().hex[:8]}"
+    script_path = Path(tempfile.gettempdir()) / f"netorium-uninstall-{parent_pid}.ps1"
+    script_lines = [
+        "$ErrorActionPreference = 'SilentlyContinue'",
+        f"Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue",
+        "Start-Sleep -Seconds 3",
+        cleanup_body,
+        f"schtasks /Delete /TN {_powershell_single_quote(task_name)} /F 2>$null | Out-Null",
+        "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
+    ]
+    script_path.write_text("\n".join(script_lines), encoding="utf-8")
+
+    task_action = subprocess.list2cmdline(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+        ]
+    )
+    create_args = [
+        "schtasks",
+        "/Create",
+        "/TN",
+        task_name,
+        "/TR",
+        task_action,
+        "/SC",
+        "ONCE",
+        "/ST",
+        "00:01",
+        "/F",
+        "/RL",
+        "HIGHEST",
+    ]
+    try:
+        _run_hidden_subprocess(create_args)
+        _run_hidden_subprocess(build_schtasks_run_command(task_name))
+    except FileNotFoundError as exc:
+        _run_hidden_subprocess(build_schtasks_delete_command(task_name))
+        raise UninstallError(
+            f"Command not found while scheduling uninstall cleanup: {exc.filename}"
+        ) from exc
+    return 0
+
+
+def _run_hidden_subprocess(args: list[str]) -> None:
+    subprocess.run(
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        creationflags=_windows_no_window_flags(),
+    )
+
+
+def _windows_no_window_flags() -> int:
+    return (
+        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+
+
+def _collapse_nested_path_targets(
+    targets: list[UninstallPathTarget],
+) -> list[UninstallPathTarget]:
+    normalized = _dedupe_targets(targets)
+    kept: list[UninstallPathTarget] = []
+    for candidate in normalized:
+        if any(_is_relative_to(candidate.path, existing.path) for existing in kept):
+            continue
+        kept.append(candidate)
+    return kept
 
 
 def _cmd_quote(path: Path) -> str:

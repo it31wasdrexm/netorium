@@ -16,6 +16,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from netorium.cli.branding import (
     render_logo_panel,
     render_notice_panel,
+    render_quickstart_panel,
+    render_status_line,
 )
 
 from netorium.cli.agent import app as endpoint_agent_app
@@ -23,6 +25,7 @@ from netorium.cli.commands.config import config_app
 from netorium.cli.commands.controller import controller_app, policy_app
 from netorium.cli.commands.device import device_app
 from netorium.cli.commands.firewall import firewall_app
+from netorium.cli.commands.report import report_app
 from netorium.cli.commands.telegram import telegram_app
 from netorium.cli.commands.update import update_app
 from netorium.cli.commands.zone import zone_app
@@ -73,6 +76,7 @@ app.add_typer(endpoint_agent_app, name="agent", rich_help_panel="Controller")
 app.add_typer(zone_app, name="zone", rich_help_panel="Inventory")
 app.add_typer(device_app, name="device", rich_help_panel="Inventory")
 app.add_typer(firewall_app, name="firewall", rich_help_panel="Policy")
+app.add_typer(report_app, name="report", rich_help_panel="Monitoring")
 app.add_typer(telegram_app, name="telegram", rich_help_panel="Integrations")
 
 
@@ -173,23 +177,21 @@ def _run_interactive_sudo(args: list[str]) -> None:
 
 def _render_interactive_header() -> None:
     console.print()
-    console.print(render_logo_panel(subtitle="zero-trust network control", border_style="magenta"))
-    
-    env_text = Text.assemble(
-        (" ✦ ", "bright_magenta"),
-        ("v", "bright_black"), (get_version(), "bold white"),
-        (" • ", "bright_black"), (platform.system() or "unknown", "cyan"),
-        (" • ", "bright_black"), (str(default_config_path()), "bright_black"),
-    )
-    console.print(Align.center(env_text))
+    console.print(render_logo_panel(subtitle="zero-trust network control", border_style="bright_cyan"))
+    console.print(render_status_line(
+        version=get_version(),
+        platform_name=platform.system() or "unknown",
+        config_path=str(default_config_path()),
+    ))
     console.print()
-    
+    console.print(render_quickstart_panel())
+    console.print()
     hint = Text.assemble(
         ("Type ", "bright_black"),
-        ("help", "bold bright_cyan"),
-        (" to see all commands, or ", "bright_black"),
-        ("exit", "bold bright_cyan"),
-        (" to leave.", "bright_black")
+        ("help", "bold cyan"),
+        (" for all commands, ", "bright_black"),
+        ("exit", "bold cyan"),
+        (" to leave.", "bright_black"),
     )
     console.print(Align.center(hint))
     console.print()
@@ -214,17 +216,16 @@ def _render_startup_update_notice() -> None:
     body.add_row("Release", f"[underline blue]{notice.info.release_url}[/]")
     
     title = Text.assemble(
-        ("✨ ", "yellow"),
         ("Update available: ", "bold white"),
         (notice.info.current_version, "bright_black"),
-        (" → ", "bright_black"),
-        (notice.info.latest_version, "bold bright_green")
+        (" -> ", "bright_black"),
+        (notice.info.latest_version, "bold bright_green"),
     )
     
     console.print(Panel(
         Align.center(body),
         title=title,
-        border_style="magenta",
+        border_style="bright_cyan",
         padding=(1, 2),
     ))
 

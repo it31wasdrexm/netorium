@@ -881,6 +881,8 @@ def record_agent_heartbeat(
     *,
     agent_id: str,
     device_token: str,
+    bytes_sent: int | None = None,
+    bytes_received: int | None = None,
 ) -> AgentHeartbeat:
     clean_agent_id = _normalize_text(agent_id, "Agent ID")
     device_token_hash = hash_token(device_token)
@@ -902,6 +904,16 @@ def record_agent_heartbeat(
                 )
                 if cursor.rowcount != 1:
                     raise ControllerError("Agent heartbeat was rejected.")
+                if bytes_sent is not None and bytes_received is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO agent_traffic_samples(
+                            agent_id, bytes_sent, bytes_received, recorded_at
+                        )
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (clean_agent_id, bytes_sent, bytes_received, timestamp),
+                    )
                 command_rows = connection.execute(
                     """
                     SELECT command_id, agent_id, command_type, payload, signature, status,
@@ -1167,11 +1179,22 @@ def _make_handler(database_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
                     return
 
+                bytes_sent = payload.get("bytes_sent")
+                bytes_received = payload.get("bytes_received")
+                traffic_sent: int | None = None
+                traffic_received: int | None = None
+                if isinstance(bytes_sent, int) and isinstance(bytes_received, int):
+                    if bytes_sent >= 0 and bytes_received >= 0:
+                        traffic_sent = bytes_sent
+                        traffic_received = bytes_received
+
                 try:
                     heartbeat = record_agent_heartbeat(
                         database_path,
                         agent_id=agent_id,
                         device_token=device_token,
+                        bytes_sent=traffic_sent,
+                        bytes_received=traffic_received,
                     )
                 except ControllerError as exc:
                     self._send_json({"error": str(exc)}, status_code=403)

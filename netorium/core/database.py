@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Final
 
-SCHEMA_VERSION: Final[int] = 6
+SCHEMA_VERSION: Final[int] = 7
 
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -92,6 +92,17 @@ ON enrollment_tokens(expires_at, used_at, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_agents_zone ON agents(zone);
 CREATE INDEX IF NOT EXISTS idx_agent_commands_agent_status
 ON agent_commands(agent_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_traffic_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+    bytes_sent INTEGER NOT NULL,
+    bytes_received INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_traffic_samples_agent_time
+ON agent_traffic_samples(agent_id, recorded_at);
 """
 
 

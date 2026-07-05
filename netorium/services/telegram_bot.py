@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import time
-import requests
 import logging
+import time
 from pathlib import Path
 
+import requests
+
+from netorium.core.settings import MonitoringSettings, default_config_path, read_config_data
 from netorium.services.controller import (
     get_controller_status,
     list_agents,
@@ -13,8 +15,17 @@ from netorium.services.controller import (
     enqueue_agent_app_commands,
     enqueue_agent_speed_commands,
 )
+from netorium.services.traffic_monitor import (
+    TrafficMonitorError,
+    detect_traffic_anomalies,
+    format_bytes,
+    list_recent_traffic_usage,
+)
 
 logger = logging.getLogger(__name__)
+
+_ANOMALY_COOLDOWN_SECONDS = 300
+
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> None:
     """Send a message to a specific chat ID using the bot token."""
@@ -26,29 +37,43 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> None:
             timeout=10,
         )
         if response.status_code != 200:
-            logger.error(f"Failed to send Telegram message: HTTP {response.status_code}")
+            logger.error("Failed to send Telegram message: HTTP %s", response.status_code)
     except Exception as exc:
-        logger.error(f"Telegram sendMessage error: {exc}")
+        logger.error("Telegram sendMessage error: %s", exc)
+
 
 def start_telegram_bot(token: str, chat_id: str, db_path: Path) -> None:
-    """
-    Start the Telegram bot long polling loop.
-    Processes messages from the configured admin chat_id and runs periodic anomaly monitoring.
-    """
+    """Start Telegram long polling and periodic traffic anomaly monitoring."""
+    monitoring = _load_monitoring_settings(db_path)
     print(f"Starting Netorium Telegram bot (authorized chat ID: {chat_id})...")
     print("Press Ctrl+C to stop the bot and exit.")
-    
-    # Send a startup notification
+
     send_telegram_message(
         token,
         chat_id,
-        "🟢 <b>Netorium Telegram Bot is online.</b>\nType /help to see available commands."
+        "<b>Netorium Telegram Bot is online.</b>\n"
+        "Type /help to see available commands.\n"
+        f"Traffic anomaly threshold: {monitoring.traffic_anomaly_threshold_mb} MB.",
     )
 
     offset = 0
+    last_anomaly_check = 0.0
+    notified_anomalies: dict[str, float] = {}
+
     while True:
         try:
-            # Get updates (long polling)
+            now = time.monotonic()
+            if now - last_anomaly_check >= monitoring.traffic_check_interval_seconds:
+                _check_traffic_anomalies(
+                    token,
+                    chat_id,
+                    db_path,
+                    monitoring=monitoring,
+                    notified_anomalies=notified_anomalies,
+                    now=now,
+                )
+                last_anomaly_check = now
+
             url = f"https://api.telegram.org/bot{token}/getUpdates"
             try:
                 response = requests.get(
@@ -57,7 +82,6 @@ def start_telegram_bot(token: str, chat_id: str, db_path: Path) -> None:
                     timeout=10,
                 )
             except requests.RequestException:
-                # Network glitch or timeout, just continue
                 time.sleep(1)
                 continue
 
@@ -82,10 +106,8 @@ def start_telegram_bot(token: str, chat_id: str, db_path: Path) -> None:
                 msg_chat_id = str(msg_chat.get("id", ""))
                 text = message.get("text", "").strip()
 
-                # Verify sender chat ID matches the configured admin chat ID
                 if msg_chat_id != chat_id:
-                    logger.warning(f"Unauthorized chat ID {msg_chat_id} tried to send command: {text}")
-                    # Send an unauthorized response back
+                    logger.warning("Unauthorized chat ID %s tried to send command: %s", msg_chat_id, text)
                     _send_unauthorized_reply(token, msg_chat_id)
                     continue
 
@@ -96,15 +118,69 @@ def start_telegram_bot(token: str, chat_id: str, db_path: Path) -> None:
 
         except KeyboardInterrupt:
             print("\nStopping Telegram bot...")
-            send_telegram_message(token, chat_id, "🔴 <b>Netorium Telegram Bot is going offline.</b>")
+            send_telegram_message(token, chat_id, "<b>Netorium Telegram Bot is going offline.</b>")
             break
         except Exception as exc:
-            logger.error(f"Error in Telegram bot main loop: {exc}")
+            logger.error("Error in Telegram bot main loop: %s", exc)
             time.sleep(2)
 
+
+def _load_monitoring_settings(db_path: Path) -> MonitoringSettings:
+    config_path = default_config_path()
+    try:
+        data = read_config_data(config_path)
+    except Exception:
+        return MonitoringSettings()
+    monitoring = data.get("monitoring")
+    if not isinstance(monitoring, dict):
+        return MonitoringSettings()
+    try:
+        return MonitoringSettings.model_validate(monitoring)
+    except Exception:
+        return MonitoringSettings()
+
+
+def _check_traffic_anomalies(
+    token: str,
+    chat_id: str,
+    db_path: Path,
+    *,
+    monitoring: MonitoringSettings,
+    notified_anomalies: dict[str, float],
+    now: float,
+) -> None:
+    try:
+        anomalies = detect_traffic_anomalies(
+            db_path,
+            threshold_mb=monitoring.traffic_anomaly_threshold_mb,
+            window_minutes=monitoring.traffic_window_minutes,
+        )
+    except TrafficMonitorError as exc:
+        logger.error("Traffic anomaly check failed: %s", exc)
+        return
+
+    for anomaly in anomalies:
+        last_notified = notified_anomalies.get(anomaly.agent_id)
+        if last_notified is not None and now - last_notified < _ANOMALY_COOLDOWN_SECONDS:
+            continue
+        notified_anomalies[anomaly.agent_id] = now
+        send_telegram_message(
+            token,
+            chat_id,
+            "<b>Traffic anomaly detected</b>\n"
+            f"Agent: <code>{anomaly.agent_id}</code>\n"
+            f"Host: <b>{anomaly.hostname}</b>\n"
+            f"Usage: <b>{format_bytes(anomaly.total_bytes)}</b> "
+            f"(threshold {format_bytes(anomaly.threshold_bytes)})\n"
+            f"Window: {anomaly.window_start} -> {anomaly.window_end}\n"
+            "Possible large download or upload activity.",
+        )
+
+
 def _send_unauthorized_reply(token: str, chat_id: str) -> None:
-    text = "⚠️ <b>Access Denied.</b> Your chat ID is not authorized to interact with this Netorium instance."
+    text = "<b>Access Denied.</b> Your chat ID is not authorized to interact with this Netorium instance."
     send_telegram_message(token, chat_id, text)
+
 
 def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> None:
     parts = text.split()
@@ -112,67 +188,96 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
 
     if command in ("/start", "/help"):
         help_text = (
-            "🤖 <b>Netorium Admin Bot Commands:</b>\n\n"
-            "📊 <b>Status & Monitoring:</b>\n"
-            "/status - View Controller status\n"
-            "/agents - List enrolled endpoint agents\n"
-            "/policies - List queued and completed commands\n\n"
-            "🛡️ <b>Access Policies:</b>\n"
-            "/block_site <code>&lt;target&gt;</code> <code>&lt;domain&gt;</code> - Block site (e.g. <code>/block_site pc-acc-01 youtube.com</code>)\n"
-            "/unblock_site <code>&lt;target&gt;</code> <code>&lt;domain&gt;</code> - Unblock site\n"
-            "/block_game <code>&lt;target&gt;</code> <code>&lt;exe&gt;</code> - Block application (e.g. <code>/block_game all dota2.exe</code>)\n"
-            "/unblock_game <code>&lt;target&gt;</code> <code>&lt;exe&gt;</code> - Unblock application\n"
-            "/limit_speed <code>&lt;target&gt;</code> <code>&lt;down&gt;</code> <code>&lt;up&gt;</code> - Limit speed in kbps\n"
-            "/clear_speed <code>&lt;target&gt;</code> - Clear speed limit\n"
+            "<b>Netorium Admin Bot Commands</b>\n\n"
+            "<b>Status and monitoring</b>\n"
+            "/status - Controller status\n"
+            "/agents - Enrolled endpoint agents\n"
+            "/policies - Recent policy commands\n"
+            "/traffic - Recent traffic usage\n\n"
+            "<b>Access policies</b>\n"
+            "/block_site <code>&lt;target&gt;</code> <code>&lt;domain&gt;</code>\n"
+            "/unblock_site <code>&lt;target&gt;</code> <code>&lt;domain&gt;</code>\n"
+            "/block_game <code>&lt;target&gt;</code> <code>&lt;exe&gt;</code>\n"
+            "/unblock_game <code>&lt;target&gt;</code> <code>&lt;exe&gt;</code>\n"
+            "/limit_speed <code>&lt;target&gt;</code> <code>&lt;down&gt;</code> <code>&lt;up&gt;</code>\n"
+            "/clear_speed <code>&lt;target&gt;</code>\n\n"
+            "Use <code>all</code> as target to apply to every enrolled agent."
         )
         send_telegram_message(token, chat_id, help_text)
 
     elif command == "/status":
         try:
             status = get_controller_status(db_path)
-            status_text = (
-                f"ℹ️ <b>Netorium Status:</b>\n\n"
-                f"<b>Listen URL:</b> http://{status.host}:{status.port}\n"
+            listen_url = status.listen_url or "not configured"
+            send_telegram_message(
+                token,
+                chat_id,
+                "<b>Netorium Status</b>\n\n"
+                f"<b>Listen URL:</b> {listen_url}\n"
                 f"<b>Active Tokens:</b> {status.active_tokens}\n"
-                f"<b>Enrolled Agents:</b> {len(list_agents(db_path))}"
+                f"<b>Enrolled Agents:</b> {len(list_agents(db_path))}",
             )
-            send_telegram_message(token, chat_id, status_text)
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Error retrieving status: {exc}")
+            send_telegram_message(token, chat_id, f"Error retrieving status: {exc}")
 
     elif command == "/agents":
         try:
             agents = list_agents(db_path)
             if not agents:
-                send_telegram_message(token, chat_id, "ℹ️ No agents enrolled yet.")
+                send_telegram_message(token, chat_id, "No agents enrolled yet.")
                 return
-            
-            lines = ["👥 <b>Enrolled Agents:</b>"]
-            for a in agents:
-                last_seen = a.last_seen_at or "never"
-                lines.append(f"• <code>{a.agent_id}</code> | <b>{a.hostname}</b> | Zone: {a.zone} | Last seen: {last_seen}")
+
+            lines = ["<b>Enrolled Agents</b>"]
+            for agent in agents:
+                last_seen = agent.last_seen_at or "never"
+                lines.append(
+                    f"- <code>{agent.agent_id}</code> | <b>{agent.hostname}</b> | "
+                    f"Zone: {agent.zone or '-'} | Last seen: {last_seen}"
+                )
             send_telegram_message(token, chat_id, "\n".join(lines))
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Error: {exc}")
+            send_telegram_message(token, chat_id, f"Error: {exc}")
+
+    elif command == "/traffic":
+        try:
+            monitoring = _load_monitoring_settings(db_path)
+            rows = list_recent_traffic_usage(
+                db_path,
+                window_minutes=monitoring.traffic_window_minutes,
+            )
+            if not rows:
+                send_telegram_message(token, chat_id, "No traffic samples yet.")
+                return
+            lines = [f"<b>Traffic ({monitoring.traffic_window_minutes} min)</b>"]
+            for row in rows[:10]:
+                lines.append(
+                    f"- <b>{row.hostname}</b>: down {format_bytes(row.bytes_received)}, "
+                    f"up {format_bytes(row.bytes_sent)}, total {format_bytes(row.total_bytes)}"
+                )
+            send_telegram_message(token, chat_id, "\n".join(lines))
+        except Exception as exc:
+            send_telegram_message(token, chat_id, f"Error: {exc}")
 
     elif command == "/policies":
         try:
             commands = list_agent_commands(db_path)
             if not commands:
-                send_telegram_message(token, chat_id, "ℹ️ No policy commands queued or completed.")
+                send_telegram_message(token, chat_id, "No policy commands queued or completed.")
                 return
-            
-            lines = ["📋 <b>Recent Policy Commands:</b>"]
-            # Show last 10 commands to keep message size reasonable
+
+            lines = ["<b>Recent Policy Commands</b>"]
             for cmd in commands[-10:]:
-                lines.append(f"• ID: <code>{cmd.command_id}</code> | Agent: <code>{cmd.agent_id}</code> | {cmd.command_type} | <b>{cmd.status}</b>")
+                lines.append(
+                    f"- ID: <code>{cmd.command_id}</code> | Agent: <code>{cmd.agent_id}</code> | "
+                    f"{cmd.command_type} | <b>{cmd.status}</b>"
+                )
             send_telegram_message(token, chat_id, "\n".join(lines))
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Error: {exc}")
+            send_telegram_message(token, chat_id, f"Error: {exc}")
 
     elif command == "/block_site":
         if len(parts) < 3:
-            send_telegram_message(token, chat_id, "❌ Usage: /block_site &lt;target&gt; &lt;domain&gt;")
+            send_telegram_message(token, chat_id, "Usage: /block_site &lt;target&gt; &lt;domain&gt;")
             return
         target, domain = parts[1], parts[2]
         try:
@@ -187,14 +292,15 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             send_telegram_message(
                 token,
                 chat_id,
-                f"✅ Site block command queued for {len(result.targets)} agents (target: {target}, domain: {domain})."
+                f"Site block queued for {len(result.targets)} agent(s) "
+                f"(target: {target}, domain: {domain}).",
             )
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Command failed: {exc}")
+            send_telegram_message(token, chat_id, f"Command failed: {exc}")
 
     elif command == "/unblock_site":
         if len(parts) < 3:
-            send_telegram_message(token, chat_id, "❌ Usage: /unblock_site &lt;target&gt; &lt;domain&gt;")
+            send_telegram_message(token, chat_id, "Usage: /unblock_site &lt;target&gt; &lt;domain&gt;")
             return
         target, domain = parts[1], parts[2]
         try:
@@ -209,14 +315,15 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             send_telegram_message(
                 token,
                 chat_id,
-                f"✅ Site unblock command queued for {len(result.targets)} agents (target: {target}, domain: {domain})."
+                f"Site unblock queued for {len(result.targets)} agent(s) "
+                f"(target: {target}, domain: {domain}).",
             )
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Command failed: {exc}")
+            send_telegram_message(token, chat_id, f"Command failed: {exc}")
 
     elif command == "/block_game":
         if len(parts) < 3:
-            send_telegram_message(token, chat_id, "❌ Usage: /block_game &lt;target&gt; &lt;exe&gt;")
+            send_telegram_message(token, chat_id, "Usage: /block_game &lt;target&gt; &lt;exe&gt;")
             return
         target, exe = parts[1], parts[2]
         try:
@@ -231,14 +338,15 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             send_telegram_message(
                 token,
                 chat_id,
-                f"✅ Game/App block command queued for {len(result.targets)} agents (target: {target}, exe: {exe})."
+                f"App block queued for {len(result.targets)} agent(s) "
+                f"(target: {target}, exe: {exe}).",
             )
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Command failed: {exc}")
+            send_telegram_message(token, chat_id, f"Command failed: {exc}")
 
     elif command == "/unblock_game":
         if len(parts) < 3:
-            send_telegram_message(token, chat_id, "❌ Usage: /unblock_game &lt;target&gt; &lt;exe&gt;")
+            send_telegram_message(token, chat_id, "Usage: /unblock_game &lt;target&gt; &lt;exe&gt;")
             return
         target, exe = parts[1], parts[2]
         try:
@@ -253,14 +361,19 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             send_telegram_message(
                 token,
                 chat_id,
-                f"✅ Game/App unblock command queued for {len(result.targets)} agents (target: {target}, exe: {exe})."
+                f"App unblock queued for {len(result.targets)} agent(s) "
+                f"(target: {target}, exe: {exe}).",
             )
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Command failed: {exc}")
+            send_telegram_message(token, chat_id, f"Command failed: {exc}")
 
     elif command == "/limit_speed":
         if len(parts) < 4:
-            send_telegram_message(token, chat_id, "❌ Usage: /limit_speed &lt;target&gt; &lt;down_kbps&gt; &lt;upload_kbps&gt;")
+            send_telegram_message(
+                token,
+                chat_id,
+                "Usage: /limit_speed &lt;target&gt; &lt;down_kbps&gt; &lt;upload_kbps&gt;",
+            )
             return
         target, down, up = parts[1], parts[2], parts[3]
         try:
@@ -275,14 +388,14 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             send_telegram_message(
                 token,
                 chat_id,
-                f"✅ Speed limit ({down}/{up} kbps) command queued for {len(result.targets)} agents (target: {target})."
+                f"Speed limit ({down}/{up} kbps) queued for {len(result.targets)} agent(s).",
             )
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Command failed: {exc}")
+            send_telegram_message(token, chat_id, f"Command failed: {exc}")
 
     elif command == "/clear_speed":
         if len(parts) < 2:
-            send_telegram_message(token, chat_id, "❌ Usage: /clear_speed &lt;target&gt;")
+            send_telegram_message(token, chat_id, "Usage: /clear_speed &lt;target&gt;")
             return
         target = parts[1]
         try:
@@ -298,10 +411,10 @@ def _handle_bot_command(token: str, chat_id: str, text: str, db_path: Path) -> N
             send_telegram_message(
                 token,
                 chat_id,
-                f"✅ Speed limit clear command queued for {len(result.targets)} agents (target: {target})."
+                f"Speed limit clear queued for {len(result.targets)} agent(s).",
             )
         except Exception as exc:
-            send_telegram_message(token, chat_id, f"❌ Command failed: {exc}")
+            send_telegram_message(token, chat_id, f"Command failed: {exc}")
 
     else:
-        send_telegram_message(token, chat_id, "❓ Unknown command. Type /help to see list of valid commands.")
+        send_telegram_message(token, chat_id, "Unknown command. Type /help to see valid commands.")

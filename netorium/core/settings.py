@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Final, Mapping
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from netorium.core.platform import user_config_path
 
@@ -28,6 +28,11 @@ bind_password = "CHANGE_ME"
 [telegram]
 bot_token = "CHANGE_ME"
 chat_id = "CHANGE_ME"
+
+[monitoring]
+traffic_anomaly_threshold_mb = 1000
+traffic_check_interval_seconds = 60
+traffic_window_minutes = 15
 
 [updates]
 source = "github"
@@ -80,6 +85,14 @@ class TelegramSettings(BaseModel):
     chat_id: str
 
 
+class MonitoringSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    traffic_anomaly_threshold_mb: int = 1000
+    traffic_check_interval_seconds: int = 60
+    traffic_window_minutes: int = 15
+
+
 class UpdateSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -95,6 +108,7 @@ class NetoriumSettings(BaseModel):
     prtg: PrtgSettings
     active_directory: ActiveDirectorySettings
     telegram: TelegramSettings
+    monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     updates: UpdateSettings
 
 

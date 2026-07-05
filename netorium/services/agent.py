@@ -26,6 +26,7 @@ from netorium.services.endpoint_policy import (
     apply_speed_policy,
 )
 from netorium.services.controller_service import reexec_windows_admin_if_needed
+from netorium.services.traffic_monitor import collect_local_traffic_counters
 from netorium.services.linux_service_runtime import (
     LinuxServiceRuntime,
     resolve_linux_service_runtime,
@@ -221,13 +222,18 @@ def run_agent_once(
 
     active_client: HttpClient = client or cast(HttpClient, _default_http_client())
     heartbeat_url = f"{state.controller_url}/heartbeat"
+    heartbeat_payload: dict[str, object] = {
+        "agent_id": state.agent_id,
+        "device_token": state.device_token,
+    }
+    traffic_counters = _collect_agent_traffic_counters()
+    if traffic_counters is not None:
+        heartbeat_payload["bytes_sent"] = traffic_counters[0]
+        heartbeat_payload["bytes_received"] = traffic_counters[1]
     try:
         response = active_client.post(
             heartbeat_url,
-            json={
-                "agent_id": state.agent_id,
-                "device_token": state.device_token,
-            },
+            json=heartbeat_payload,
             timeout=timeout,
         )
     except requests.RequestException as exc:
@@ -967,6 +973,13 @@ def _normalize_text(value: str, label: str) -> str:
     if not clean_value:
         raise AgentError(f"{label} cannot be empty.")
     return clean_value
+
+
+def _collect_agent_traffic_counters() -> tuple[int, int] | None:
+    try:
+        return collect_local_traffic_counters()
+    except OSError:
+        return None
 
 
 def _read_json_object(response: HttpResponse) -> dict[str, Any]:

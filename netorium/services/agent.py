@@ -24,6 +24,7 @@ from netorium.services.endpoint_policy import (
     apply_ip_firewall_policy,
     apply_site_policy,
     apply_speed_policy,
+    enforce_unix_app_blocklist,
 )
 from netorium.services.controller_service import reexec_windows_admin_if_needed
 from netorium.services.traffic_monitor import collect_local_traffic_counters
@@ -215,6 +216,7 @@ def run_agent_once(
     client: HttpClient | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> AgentRunResult:
+    _enforce_local_unix_policies()
     try:
         state = load_agent_state(state_path)
     except AgentError as exc:
@@ -1082,6 +1084,14 @@ def _format_optional_kbps(value: int | None) -> str:
     if value is None:
         return "unlimited"
     return f"{value}kbps"
+
+
+def _enforce_local_unix_policies() -> None:
+    try:
+        enforce_unix_app_blocklist()
+    except Exception:
+        # Enforcement should not break heartbeats when the local OS has no matching tools.
+        pass
 
 
 def _read_commands(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:

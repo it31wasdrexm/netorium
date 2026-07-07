@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from netorium.core.platform import user_data_dir
 from netorium.core.subprocess_utils import run_text_optional
 
 
@@ -61,10 +64,13 @@ def apply_site_policy(
     hosts_path: Path | None = None,
     platform_name: str | None = None,
 ) -> EndpointPolicyResult:
-    _require_windows(platform_name)
-    active_hosts_path = hosts_path or Path(os.environ.get("SystemRoot", r"C:\Windows")) / (
-        r"System32\drivers\etc\hosts"
-    )
+    active_platform = _active_platform_name(platform_name)
+    if active_platform.startswith("win"):
+        active_hosts_path = hosts_path or Path(os.environ.get("SystemRoot", r"C:\Windows")) / (
+            r"System32\drivers\etc\hosts"
+        )
+    else:
+        active_hosts_path = hosts_path or Path("/etc/hosts")
     domains = _hosts_domains(domain)
     start_marker = f"# NETORIUM BLOCK START {domain}"
     end_marker = f"# NETORIUM BLOCK END {domain}"
@@ -81,9 +87,15 @@ def apply_site_policy(
         lines.extend(_hosts_block_lines(domains))
         lines.append(end_marker)
         updated = updated.rstrip() + "\n" + "\n".join(lines) + "\n"
-        firewall_script = _site_firewall_block_script(rule_name, domains, reason)
+        if active_platform.startswith("win"):
+            firewall_script = _site_firewall_block_script(rule_name, domains, reason)
+        else:
+            firewall_script = None
     elif action == "unblock":
-        firewall_script = _site_firewall_unblock_script(rule_name)
+        if active_platform.startswith("win"):
+            firewall_script = _site_firewall_unblock_script(rule_name)
+        else:
+            firewall_script = None
     else:
         raise EndpointPolicyError("Site policy action must be block or unblock.")
 
@@ -92,9 +104,13 @@ def apply_site_policy(
     except OSError as exc:
         raise EndpointPolicyError(f"Could not write hosts file {active_hosts_path}: {exc}") from exc
 
-    _run_powershell(firewall_script)
-    _run_powershell(_site_dns_flush_script())
-    return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
+    if active_platform.startswith("win"):
+        if firewall_script is not None:
+            _run_powershell(firewall_script)
+        _run_powershell(_site_dns_flush_script())
+        return EndpointPolicyResult(f"Windows hosts site {action} applied for {domain}.")
+    _flush_dns_cache_non_windows()
+    return EndpointPolicyResult(f"{active_platform} hosts site {action} applied for {domain}.")
 
 
 def apply_app_policy(
@@ -104,7 +120,11 @@ def apply_app_policy(
     reason: str,
     platform_name: str | None = None,
 ) -> EndpointPolicyResult:
-    _require_windows(platform_name)
+    active_platform = _active_platform_name(platform_name)
+    if active_platform.startswith("linux") or active_platform == "darwin":
+        return _apply_unix_app_policy(action=action, executable=executable, reason=reason)
+
+    _require_windows(active_platform)
     rule_name = _rule_name("App", executable)
 
     aliases = {
@@ -193,9 +213,15 @@ def apply_speed_policy(
 # ---------------------------------------------------------------------------
 
 def _require_windows(platform_name: str | None = None) -> None:
-    active_platform = platform_name or platform.system()
+    active_platform = _active_platform_name(platform_name)
     if not active_platform.lower().startswith("win"):
         raise EndpointPolicyError("Real endpoint policy commands are Windows-only.")
+
+
+def _active_platform_name(platform_name: str | None) -> str:
+    if platform_name is not None:
+        return platform_name.lower()
+    return platform.system().lower()
 
 
 def _run_powershell(script: str) -> None:
@@ -271,6 +297,18 @@ def _site_dns_flush_script() -> str:
         "Clear-DnsClientCache -ErrorAction SilentlyContinue; "
         "ipconfig /flushdns | Out-Null"
     )
+
+
+def _flush_dns_cache_non_windows() -> None:
+    commands: tuple[tuple[str, ...], ...] = (
+        ("resolvectl", "flush-caches"),
+        ("systemd-resolve", "--flush-caches"),
+        ("service", "nscd", "restart"),
+    )
+    for command in commands:
+        if shutil.which(command[0]) is None:
+            continue
+        run_text_optional(command)
 
 
 def _looks_like_executable_path(executable: str) -> bool:
@@ -361,3 +399,77 @@ def _rule_name(kind: str, target: str) -> str:
 
 def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _app_blocklist_path() -> Path:
+    return user_data_dir() / "agent_app_blocklist.json"
+
+
+def _load_app_blocklist() -> list[str]:
+    path = _app_blocklist_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    clean_entries = [str(item).strip() for item in payload if str(item).strip()]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in clean_entries:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _save_app_blocklist(entries: Sequence[str]) -> None:
+    path = _app_blocklist_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(list(entries), ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise EndpointPolicyError(f"Could not update app blocklist {path}: {exc}") from exc
+
+
+def _apply_unix_app_policy(*, action: str, executable: str, reason: str) -> EndpointPolicyResult:
+    blocklist = _load_app_blocklist()
+    normalized = executable.strip()
+    if not normalized:
+        raise EndpointPolicyError("Executable cannot be empty.")
+
+    lowered = normalized.lower()
+    existing = {item.lower() for item in blocklist}
+    if action == "block":
+        if lowered not in existing:
+            blocklist.append(normalized)
+            _save_app_blocklist(blocklist)
+        _terminate_matching_processes(normalized)
+        return EndpointPolicyResult(
+            f"Unix app block enabled for {normalized}. Reason: {reason}. "
+            "Matching processes will be terminated."
+        )
+    if action == "unblock":
+        updated = [item for item in blocklist if item.lower() != lowered]
+        _save_app_blocklist(updated)
+        return EndpointPolicyResult(f"Unix app block removed for {normalized}.")
+    raise EndpointPolicyError("Application policy action must be block or unblock.")
+
+
+def enforce_unix_app_blocklist() -> None:
+    if _active_platform_name(None).startswith("win"):
+        return
+    for executable in _load_app_blocklist():
+        _terminate_matching_processes(executable)
+
+
+def _terminate_matching_processes(executable: str) -> None:
+    process_name = Path(executable).name or executable
+    try:
+        run_text_optional(("pkill", "-f", process_name))
+    except OSError:
+        return

@@ -25,6 +25,7 @@ from netorium.services.endpoint_policy import (
     apply_site_policy,
     apply_speed_policy,
     enforce_unix_app_blocklist,
+    enforce_unix_site_blocklist,
 )
 from netorium.services.controller_service import reexec_windows_admin_if_needed
 from netorium.services.traffic_monitor import collect_local_traffic_counters
@@ -33,7 +34,7 @@ from netorium.services.linux_service_runtime import (
     build_sudo_reexec_command,
     resolve_linux_service_runtime,
     systemd_environment_lines,
-    systemd_service_account_lines,
+    user_home,
 )
 from netorium.services.windows_background import (
     build_schtasks_create_command,
@@ -417,7 +418,8 @@ def _find_netorium_executable() -> str:
 # ─── Linux / systemd ──────────────────────────────────────────────────────────
 
 def _systemd_unit_content(runtime: LinuxServiceRuntime, *, system: bool) -> str:
-    service_lines = systemd_service_account_lines(runtime) if system else []
+    # System units run as root so Linux site policies can update /etc/hosts.
+    service_lines = [] if system else []
     environment_lines = systemd_environment_lines(runtime, system=system)
     indented_service = "".join(f"        {line}\n" for line in service_lines)
     indented_environment = "".join(f"        {line}\n" for line in environment_lines)
@@ -459,7 +461,8 @@ def _systemd_action(action: str, *, system: bool) -> str:
             _run_service_cmd(["systemctl", "enable", "--now", _SYSTEMD_SERVICE_NAME])
             return (
                 f"[systemd system] Agent service installed: {unit_file}\n"
-                f"  Runs as: {runtime.service_user}\n"
+                f"  Runs as: root (required for /etc/hosts site policies)\n"
+                f"  Data dir: {user_home(runtime.service_user)}/.local/share/netorium\n"
                 f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}\n"
                 f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f\n"
                 f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}"
@@ -1207,6 +1210,10 @@ def _enforce_local_unix_policies() -> None:
         enforce_unix_app_blocklist()
     except Exception:
         # Enforcement should not break heartbeats when the local OS has no matching tools.
+        pass
+    try:
+        enforce_unix_site_blocklist()
+    except Exception:
         pass
 
 

@@ -88,8 +88,14 @@ def apply_site_policy(
     reason: str,
     hosts_path: Path | None = None,
     platform_name: str | None = None,
+    update_blocklist: bool = True,
 ) -> EndpointPolicyResult:
     active_platform = _active_platform_name(platform_name)
+    if update_blocklist and not active_platform.startswith("win"):
+        if action == "block":
+            _add_site_blocklist_entry(domain, reason)
+        elif action == "unblock":
+            _remove_site_blocklist_entry(domain)
     if active_platform.startswith("win"):
         active_hosts_path = hosts_path or Path(os.environ.get("SystemRoot", r"C:\Windows")) / (
             r"System32\drivers\etc\hosts"
@@ -431,6 +437,71 @@ def _app_blocklist_path() -> Path:
     return user_data_dir() / "agent_app_blocklist.json"
 
 
+def _site_blocklist_path() -> Path:
+    return user_data_dir() / "agent_site_blocklist.json"
+
+
+def _load_site_blocklist() -> list[dict[str, str]]:
+    path = _site_blocklist_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        domain = str(item.get("domain", "")).strip().lower()
+        reason = str(item.get("reason", "")).strip() or "Netorium site policy"
+        if not domain or domain in seen:
+            continue
+        seen.add(domain)
+        entries.append({"domain": domain, "reason": reason})
+    return entries
+
+
+def _save_site_blocklist(entries: Sequence[dict[str, str]]) -> None:
+    path = _site_blocklist_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(list(entries), ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise EndpointPolicyError(f"Could not update site blocklist {path}: {exc}") from exc
+
+
+def _add_site_blocklist_entry(domain: str, reason: str) -> None:
+    clean_domain = domain.strip().lower()
+    if not clean_domain:
+        return
+    entries = [
+        entry
+        for entry in _load_site_blocklist()
+        if entry["domain"] != clean_domain
+    ]
+    entries.append({"domain": clean_domain, "reason": reason.strip() or "Netorium site policy"})
+    _save_site_blocklist(entries)
+
+
+def _remove_site_blocklist_entry(domain: str) -> None:
+    clean_domain = domain.strip().lower()
+    if not clean_domain:
+        return
+    entries = [
+        entry
+        for entry in _load_site_blocklist()
+        if entry["domain"] != clean_domain
+    ]
+    _save_site_blocklist(entries)
+
+
 def _load_app_blocklist() -> list[str]:
     path = _app_blocklist_path()
     if not path.exists():
@@ -491,8 +562,27 @@ def enforce_unix_app_blocklist() -> None:
         _terminate_matching_processes(executable)
 
 
+def enforce_unix_site_blocklist() -> None:
+    if _active_platform_name(None).startswith("win"):
+        return
+    for entry in _load_site_blocklist():
+        try:
+            apply_site_policy(
+                action="block",
+                domain=entry["domain"],
+                reason=entry["reason"],
+                update_blocklist=False,
+            )
+        except EndpointPolicyError:
+            continue
+
+
 def _needs_privileged_hosts_access(hosts_path: Path, active_platform: str) -> bool:
-    return active_platform.startswith("linux") and hosts_path == Path("/etc/hosts")
+    if not active_platform.startswith("linux") or hosts_path != Path("/etc/hosts"):
+        return False
+    if os.geteuid() == 0:
+        return False
+    return True
 
 
 def _read_hosts_text(hosts_path: Path, *, privileged: bool) -> str:

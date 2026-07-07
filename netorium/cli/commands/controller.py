@@ -515,7 +515,7 @@ def policy_site(
     ] = False,
     real: Annotated[
         bool,
-        typer.Option("--real", help="Apply on the Windows endpoint. Default is dry-run."),
+        typer.Option("--real", help="Apply on the endpoint. Default is dry-run."),
     ] = False,
 ) -> None:
     """Block or unblock a website on one or all endpoints."""

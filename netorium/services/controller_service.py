@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import ctypes
 import os
-import socket
 import time
 import urllib.error
 import urllib.request
@@ -25,6 +24,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+from netorium.core.network import detect_lan_ipv4
 from netorium.core.settings import ConfigError, load_settings
 from netorium.core.subprocess_utils import run_text, run_text_optional
 from netorium.services.controller import get_controller_status
@@ -119,9 +119,13 @@ def try_provision_controller_background_service(
 ) -> str | None:
     """Install and start the controller background service after initialization."""
     try:
-        return install_controller_service(host=host, port=port, system=False)
+        message = install_controller_service(host=host, port=port, system=False)
     except ControllerServiceError:
         return None
+    restart_note = _restart_controller_service()
+    if restart_note is None:
+        return message
+    return f"{message}\n{restart_note}"
 
 
 def reexec_system_install_if_needed(
@@ -304,13 +308,17 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
         _write_file_root(unit_file, content)
         _run(["systemctl", "daemon-reload"])
         _run(["systemctl", "enable", "--now", _SYSTEMD_SERVICE_NAME])
-        return (
-            f"System service installed and started: {unit_file}\n"
-            f"  Runs as: {runtime.service_user}\n"
-            f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}\n"
-            f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f\n"
-            f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}"
-        )
+        firewall_note = _configure_linux_firewall(port)
+        parts = [
+            f"System service installed and started: {unit_file}",
+            f"  Runs as: {runtime.service_user}",
+            f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}",
+            f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f",
+            f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}",
+        ]
+        if firewall_note is not None:
+            parts.append(firewall_note)
+        return "\n".join(parts)
 
     unit_dir = _systemd_user_dir()
     unit_dir.mkdir(parents=True, exist_ok=True)
@@ -323,12 +331,16 @@ def _install_systemd(host: str, port: int, *, system: bool) -> str:
     username = os.environ.get("USER") or os.environ.get("USERNAME") or ""
     if username:
         _run_optional(["loginctl", "enable-linger", username])
-    return (
-        f"User service installed and started: {unit_file}\n"
-        f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
-        f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
-        f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}"
-    )
+    firewall_note = _configure_linux_firewall(port)
+    parts = [
+        f"User service installed and started: {unit_file}",
+        f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}",
+        f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f",
+        f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}",
+    ]
+    if firewall_note is not None:
+        parts.append(firewall_note)
+    return "\n".join(parts)
 
 
 def _uninstall_systemd() -> str:
@@ -678,7 +690,7 @@ def _format_windows_lan_health_hint(*, host: str, port: int) -> str | None:
     if host not in {"0.0.0.0", "::"}:
         return None
 
-    lan_host = _detect_windows_lan_host()
+    lan_host = detect_lan_ipv4()
     if lan_host is None:
         return None
 
@@ -692,14 +704,46 @@ def _format_windows_lan_health_hint(*, host: str, port: int) -> str | None:
 
 
 def _detect_windows_lan_host() -> str | None:
-    try:
-        for result in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            address = str(result[4][0])
-            if not address.startswith("127.") and address != "0.0.0.0":
-                return address
-    except OSError:
+    return detect_lan_ipv4()
+
+
+def _restart_controller_service() -> str | None:
+    if not sys.platform.startswith("linux"):
         return None
-    return None
+    restarted = False
+    if (_SYSTEMD_SYSTEM_DIR / f"{_SYSTEMD_SERVICE_NAME}.service").exists():
+        _run_optional(["systemctl", "restart", _SYSTEMD_SERVICE_NAME])
+        restarted = True
+    if (_systemd_user_dir() / f"{_SYSTEMD_SERVICE_NAME}.service").exists():
+        _run_optional(["systemctl", "--user", "restart", _SYSTEMD_SERVICE_NAME])
+        restarted = True
+    if not restarted:
+        return None
+    return "  Controller service restarted to pick up the latest controller state."
+
+
+def _configure_linux_firewall(port: int) -> str | None:
+    if not sys.platform.startswith("linux"):
+        return None
+    if shutil.which("ufw") is None:
+        return (
+            f"  Firewall: open inbound TCP {port} manually if remote agents cannot connect "
+            f"(for example `sudo ufw allow {port}/tcp`)."
+        )
+    result = run_text_optional(["ufw", "status"])
+    status = (result.stdout or result.stderr or "").lower()
+    if "inactive" in status:
+        return (
+            f"  Firewall: ufw is installed but inactive. Enable it or open TCP {port} "
+            "in your firewall if remote agents cannot connect."
+        )
+    allow = run_text_optional(["ufw", "allow", f"{port}/tcp"])
+    if allow.returncode == 0:
+        return f"  Firewall: allowed inbound TCP {port} through ufw."
+    return (
+        f"  Firewall: could not add ufw rule for TCP {port}. "
+        f"Run manually: sudo ufw allow {port}/tcp"
+    )
 
 
 def _find_executable(name: str) -> str:

@@ -9,6 +9,7 @@ from netorium.cli.branding import make_kv_table, make_table
 
 from netorium.core.database import DatabaseError
 from netorium.core.settings import ConfigError, load_settings
+from netorium.core.network import build_enrollment_urls
 from netorium.services.controller import (
     AgentCommandRecord,
     BatchAgentCommandResult,
@@ -85,7 +86,13 @@ def init(
         _fail(exc)
 
     console.print("Netorium Controller initialized.")
-    _render_config(config.host, config.port, status.enrollment_url, status.active_tokens)
+    _render_config(
+        config.host,
+        config.port,
+        status.enrollment_url,
+        status.lan_enrollment_url,
+        status.active_tokens,
+    )
 
     background_message = try_provision_controller_background_service(host=host, port=port)
     if background_message is not None:
@@ -108,9 +115,17 @@ def status() -> None:
     table = make_kv_table("Netorium Controller")
     table.add_row("Initialized", "yes" if controller_status.initialized else "no")
     table.add_row("Listen URL", controller_status.listen_url or "-")
-    table.add_row("Enrollment URL", controller_status.enrollment_url or "-")
+    table.add_row("Enrollment URL (this PC)", controller_status.enrollment_url or "-")
+    if controller_status.lan_enrollment_url:
+        table.add_row("Enrollment URL (LAN agents)", controller_status.lan_enrollment_url)
     table.add_row("Active enrollment tokens", str(controller_status.active_tokens))
     console.print(table)
+
+    if controller_status.initialized and controller_status.lan_enrollment_url is None:
+        console.print(
+            "Remote agents need your controller PC's LAN IP, for example "
+            "`http://192.168.1.10:8765` instead of 127.0.0.1."
+        )
 
     if not controller_status.initialized:
         console.print("Run: netorium controller init")
@@ -147,7 +162,10 @@ def start(
     if not quiet:
         console.print("Starting Netorium Controller.")
         console.print(f"Listen: http://{host}:{port}")
-        console.print(f"Enrollment URL: {build_enrollment_url(host, port)}")
+        local_url, lan_url = build_enrollment_urls(host=host, port=port)
+        console.print(f"Enrollment URL (this PC): {local_url}")
+        if lan_url is not None:
+            console.print(f"Enrollment URL (LAN agents): {lan_url}")
         console.print("Press Ctrl+C to stop.")
 
     try:
@@ -192,10 +210,18 @@ def token_create(
     table.add_row("Purpose", token.purpose)
     table.add_row("Zone", token.zone or "(all zones)")
     table.add_row("Expires", token.expires_at)
-    table.add_row("Controller", status.enrollment_url or "-")
+    table.add_row("Controller (this PC)", status.enrollment_url or "-")
+    if status.lan_enrollment_url:
+        table.add_row("Controller (LAN agents)", status.lan_enrollment_url)
     console.print(table)
     console.print("Token (shown once):")
     console.print(token.token)
+    if status.lan_enrollment_url:
+        console.print(
+            "On remote endpoints use the LAN controller URL, for example:\n"
+            f"  netorium-agent enroll --controller {status.lan_enrollment_url[:-len('/enroll')]} "
+            f"--token {token.token}"
+        )
 
 
 @agent_app.command("list")
@@ -625,13 +651,21 @@ def _render_config(
     host: str,
     port: int,
     enrollment_url: str | None,
+    lan_enrollment_url: str | None,
     active_tokens: int,
 ) -> None:
     table = make_kv_table("Netorium Controller")
     table.add_row("Listen", f"http://{host}:{port}")
-    table.add_row("Enrollment URL", enrollment_url or "-")
+    table.add_row("Enrollment URL (this PC)", enrollment_url or "-")
+    if lan_enrollment_url:
+        table.add_row("Enrollment URL (LAN agents)", lan_enrollment_url)
     table.add_row("Active enrollment tokens", str(active_tokens))
     console.print(table)
+    if lan_enrollment_url is None and host in {"0.0.0.0", "::"}:
+        console.print(
+            "Could not detect a LAN IP automatically. Remote agents must use this PC's "
+            "real network address instead of 127.0.0.1."
+        )
 
 
 def _payload_summary(payload: dict[str, object]) -> str:

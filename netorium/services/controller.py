@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from netorium.core.audit import write_audit_entry
 from netorium.core.database import connect_database, initialize_database
+from netorium.core.network import build_enrollment_urls, detect_lan_ipv4, format_url_host
 from netorium.services.command_signing import build_agent_command_signature, hash_shared_secret
 
 DEFAULT_CONTROLLER_HOST = "0.0.0.0"
@@ -56,6 +57,7 @@ class ControllerStatus:
     port: int | None
     listen_url: str | None
     enrollment_url: str | None
+    lan_enrollment_url: str | None
     active_tokens: int
 
 
@@ -214,15 +216,21 @@ def get_controller_status(database_path: str | Path) -> ControllerStatus:
             port=None,
             listen_url=None,
             enrollment_url=None,
+            lan_enrollment_url=None,
             active_tokens=active_tokens,
         )
 
+    local_enrollment_url, lan_enrollment_url = build_enrollment_urls(
+        host=config.host,
+        port=config.port,
+    )
     return ControllerStatus(
         initialized=True,
         host=config.host,
         port=config.port,
-        listen_url=f"http://{_format_url_host(config.host)}:{config.port}",
-        enrollment_url=build_enrollment_url(config.host, config.port),
+        listen_url=f"http://{format_url_host(config.host)}:{config.port}",
+        enrollment_url=local_enrollment_url,
+        lan_enrollment_url=lan_enrollment_url,
         active_tokens=active_tokens,
     )
 
@@ -1075,8 +1083,11 @@ def hash_token(token: str) -> str:
 
 
 def build_enrollment_url(host: str, port: int) -> str:
-    client_host = _client_host(host)
-    return f"http://{_format_url_host(client_host)}:{_normalize_port(port)}/enroll"
+    local_enrollment_url, lan_enrollment_url = build_enrollment_urls(
+        host=host,
+        port=_normalize_port(port),
+    )
+    return lan_enrollment_url or local_enrollment_url
 
 
 def serve_controller(
@@ -1119,6 +1130,7 @@ def _make_handler(database_path: Path) -> type[BaseHTTPRequestHandler]:
                         "initialized": status.initialized,
                         "listen_url": status.listen_url,
                         "enrollment_url": status.enrollment_url,
+                        "lan_enrollment_url": status.lan_enrollment_url,
                         "active_tokens": status.active_tokens,
                     }
                 )
@@ -1473,26 +1485,12 @@ def _normalize_optional_zone(value: str) -> str:
 
 def _client_host(host: str) -> str:
     if host in {"0.0.0.0", "::"}:
-        return _detect_lan_host()
+        return detect_lan_ipv4() or "127.0.0.1"
     return host
-
-
-def _detect_lan_host() -> str:
-    try:
-        for result in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            address = str(result[4][0])
-            if not address.startswith("127.") and address != "0.0.0.0":
-                return address
-    except socket.gaierror:
-        return "127.0.0.1"
-
-    return "127.0.0.1"
 
 
 def _format_url_host(host: str) -> str:
-    if ":" in host and not host.startswith("["):
-        return f"[{host}]"
-    return host
+    return format_url_host(host)
 
 
 def _now_utc() -> datetime:

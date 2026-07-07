@@ -1,16 +1,41 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import platform
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 from netorium.core.platform import user_data_dir
 from netorium.core.subprocess_utils import run_text_optional
+
+_UNIX_APP_ALIASES: dict[str, str] = {
+    "tg": "telegram",
+    "tg.exe": "telegram",
+    "telegram": "telegram",
+    "telegram.exe": "telegram",
+    "dota": "dota2",
+    "dota.exe": "dota2",
+    "dota2": "dota2",
+    "dota2.exe": "dota2",
+    "cs1.6": "hl",
+    "cs16": "hl",
+    "cs1.6.exe": "hl",
+    "minecraft": "minecraft-launcher",
+    "mc": "minecraft-launcher",
+    "minecraft.exe": "minecraft-launcher",
+    "discord": "discord",
+    "discord.exe": "discord",
+    "steam": "steam",
+    "steam.exe": "steam",
+    "epic": "epicgameslauncher",
+    "epic.exe": "epicgameslauncher",
+}
 
 
 class EndpointPolicyError(RuntimeError):
@@ -76,8 +101,9 @@ def apply_site_policy(
     end_marker = f"# NETORIUM BLOCK END {domain}"
     rule_name = _rule_name("Site", domain)
 
+    privileged_hosts = _needs_privileged_hosts_access(active_hosts_path, active_platform)
     try:
-        current = active_hosts_path.read_text(encoding="utf-8", errors="ignore")
+        current = _read_hosts_text(active_hosts_path, privileged=privileged_hosts)
     except OSError as exc:
         raise EndpointPolicyError(f"Could not read hosts file {active_hosts_path}: {exc}") from exc
 
@@ -100,7 +126,7 @@ def apply_site_policy(
         raise EndpointPolicyError("Site policy action must be block or unblock.")
 
     try:
-        active_hosts_path.write_text(updated, encoding="utf-8")
+        _write_hosts_text(active_hosts_path, updated, privileged=privileged_hosts)
     except OSError as exc:
         raise EndpointPolicyError(f"Could not write hosts file {active_hosts_path}: {exc}") from exc
 
@@ -438,23 +464,21 @@ def _save_app_blocklist(entries: Sequence[str]) -> None:
 
 def _apply_unix_app_policy(*, action: str, executable: str, reason: str) -> EndpointPolicyResult:
     blocklist = _load_app_blocklist()
-    normalized = executable.strip()
+    normalized = _normalize_unix_executable(executable)
     if not normalized:
         raise EndpointPolicyError("Executable cannot be empty.")
 
-    lowered = normalized.lower()
-    existing = {item.lower() for item in blocklist}
     if action == "block":
-        if lowered not in existing:
-            blocklist.append(normalized)
-            _save_app_blocklist(blocklist)
+        updated = [item for item in blocklist if item.lower() != normalized.lower()]
+        updated.append(normalized)
+        _save_app_blocklist(updated)
         _terminate_matching_processes(normalized)
         return EndpointPolicyResult(
             f"Unix app block enabled for {normalized}. Reason: {reason}. "
             "Matching processes will be terminated."
         )
     if action == "unblock":
-        updated = [item for item in blocklist if item.lower() != lowered]
+        updated = [item for item in blocklist if item.lower() != normalized.lower()]
         _save_app_blocklist(updated)
         return EndpointPolicyResult(f"Unix app block removed for {normalized}.")
     raise EndpointPolicyError("Application policy action must be block or unblock.")
@@ -467,9 +491,83 @@ def enforce_unix_app_blocklist() -> None:
         _terminate_matching_processes(executable)
 
 
-def _terminate_matching_processes(executable: str) -> None:
-    process_name = Path(executable).name or executable
+def _needs_privileged_hosts_access(hosts_path: Path, active_platform: str) -> bool:
+    return active_platform.startswith("linux") and hosts_path == Path("/etc/hosts")
+
+
+def _read_hosts_text(hosts_path: Path, *, privileged: bool) -> str:
     try:
-        run_text_optional(("pkill", "-f", process_name))
-    except OSError:
+        return hosts_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        if not privileged or exc.errno not in (errno.EACCES, errno.EPERM):
+            raise
+        completed = run_text_optional(["sudo", "-n", "cat", str(hosts_path)])
+        if completed.returncode == 0:
+            return completed.stdout
+        raise EndpointPolicyError(_privileged_hosts_error(hosts_path, "read")) from exc
+
+
+def _write_hosts_text(hosts_path: Path, content: str, *, privileged: bool) -> None:
+    try:
+        hosts_path.write_text(content, encoding="utf-8")
         return
+    except OSError as exc:
+        if not privileged or exc.errno not in (errno.EACCES, errno.EPERM):
+            raise
+        completed = subprocess.run(
+            ["sudo", "-n", "tee", str(hosts_path)],
+            input=content,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if completed.returncode == 0:
+            return
+        raise EndpointPolicyError(_privileged_hosts_error(hosts_path, "write")) from exc
+
+
+def _privileged_hosts_error(hosts_path: Path, action: str) -> str:
+    return (
+        f"Could not {action} {hosts_path}. "
+        "Linux site policies need root access to /etc/hosts. "
+        "Install the agent system service (`netorium agent service install --system`) "
+        "or grant passwordless sudo for hosts updates."
+    )
+
+
+def _normalize_unix_executable(executable: str) -> str:
+    cleaned = executable.strip().strip("'\"").strip()
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower()
+    if lowered in _UNIX_APP_ALIASES:
+        return _UNIX_APP_ALIASES[lowered]
+    if _looks_like_executable_path(cleaned):
+        return Path(cleaned).name
+    if lowered.endswith(".exe"):
+        return lowered[:-4]
+    return cleaned
+
+
+def _unix_process_patterns(executable: str) -> list[str]:
+    canonical = _normalize_unix_executable(executable)
+    patterns: set[str] = set()
+    if canonical:
+        patterns.add(canonical)
+        patterns.add(Path(canonical).name)
+    for value in (canonical, executable):
+        lowered = value.lower()
+        if lowered.endswith(".exe"):
+            patterns.add(lowered[:-4])
+    return sorted({pattern for pattern in patterns if pattern}, key=len, reverse=True)
+
+
+def _terminate_matching_processes(executable: str) -> None:
+    for pattern in _unix_process_patterns(executable):
+        try:
+            run_text_optional(("pkill", "-x", pattern))
+            run_text_optional(("pkill", "-f", pattern))
+        except OSError:
+            continue

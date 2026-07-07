@@ -30,7 +30,10 @@ from netorium.services.controller_service import reexec_windows_admin_if_needed
 from netorium.services.traffic_monitor import collect_local_traffic_counters
 from netorium.services.linux_service_runtime import (
     LinuxServiceRuntime,
+    build_sudo_reexec_command,
     resolve_linux_service_runtime,
+    systemd_environment_lines,
+    systemd_service_account_lines,
 )
 from netorium.services.windows_background import (
     build_schtasks_create_command,
@@ -146,7 +149,7 @@ def enroll_agent(
         raise AgentError(f"Could not reach controller enrollment endpoint: {exc}") from exc
 
     if response.status_code >= 400:
-        raise AgentError(f"Controller enrollment failed with HTTP {response.status_code}: {response.text}")
+        raise AgentError(_format_enrollment_failure(response, controller_url=clean_controller_url))
 
     payload = _read_json_object(response)
     agent_id = _read_required_string(payload, "agent_id")
@@ -342,6 +345,7 @@ def _start_detached_agent_loop() -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 _SYSTEMD_SERVICE_NAME = "netorium-agent"
+_SYSTEMD_SYSTEM_DIR = Path("/etc/systemd/system")
 _SYSTEMD_USER_DIR = Path("~/.config/systemd/user").expanduser()
 _LAUNCHD_LABEL = "com.netorium.agent"
 _LAUNCHD_PLIST_DIR = Path("~/Library/LaunchAgents").expanduser()
@@ -349,7 +353,7 @@ _WINDOWS_SERVICE_NAME = "NetoriumAgent"
 _WINDOWS_TASK_NAME = "NetoriumAgent"
 
 
-def service_action(action: str) -> str:
+def service_action(action: str, *, system: bool = False) -> str:
     """Install, start, stop, or uninstall the agent background service."""
     clean_action = _normalize_text(action, "Service action")
     if clean_action not in {"install", "start", "stop", "uninstall"}:
@@ -357,7 +361,8 @@ def service_action(action: str) -> str:
 
     platform = sys.platform
     if platform.startswith("linux"):
-        return _systemd_action(clean_action)
+        reexec_sudo_agent_install_if_needed(action=clean_action, system=system)
+        return _systemd_action(clean_action, system=system)
     if platform == "darwin":
         return _launchd_action(clean_action)
     if platform.startswith("win"):
@@ -366,6 +371,25 @@ def service_action(action: str) -> str:
         f"Unsupported platform for service management: {platform}. "
         "Supported: Linux (systemd), macOS (launchd), Windows (sc.exe/NSSM)."
     )
+
+
+def reexec_sudo_agent_install_if_needed(*, action: str, system: bool) -> None:
+    """Re-exec this process under sudo for a Linux system agent service install."""
+    if action != "install" or not system or os.geteuid() == 0:
+        return
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    executable = _find_netorium_executable()
+    try:
+        os.execvp(
+            "sudo",
+            build_sudo_reexec_command(argv_tail=["agent", "service", "install", "--system"]),
+        )
+    except FileNotFoundError as exc:
+        raise AgentError(
+            "sudo was not found. Install sudo or run the install command as root:\n"
+            f"  {executable} agent service install --system"
+        ) from exc
 
 
 # ─── Helpers for combined binary ─────────────────────────────────────────────
@@ -392,11 +416,12 @@ def _find_netorium_executable() -> str:
 
 # ─── Linux / systemd ──────────────────────────────────────────────────────────
 
-def _systemd_unit_content(runtime: LinuxServiceRuntime) -> str:
-    environment_lines = "".join(
-        f"        Environment={key}={value}\n"
-        for key, value in runtime.environment
-    )
+def _systemd_unit_content(runtime: LinuxServiceRuntime, *, system: bool) -> str:
+    service_lines = systemd_service_account_lines(runtime) if system else []
+    environment_lines = systemd_environment_lines(runtime, system=system)
+    indented_service = "".join(f"        {line}\n" for line in service_lines)
+    indented_environment = "".join(f"        {line}\n" for line in environment_lines)
+    wanted_by = "multi-user.target" if system else "default.target"
     return textwrap.dedent(f"""\
         [Unit]
         Description=Netorium Agent
@@ -404,23 +429,62 @@ def _systemd_unit_content(runtime: LinuxServiceRuntime) -> str:
 
         [Service]
         Type=simple
-{environment_lines}        ExecStart={runtime.exec_start}
+{indented_service}{indented_environment}        ExecStart={runtime.exec_start}
         Restart=always
         RestartSec=15
 
         [Install]
-        WantedBy=default.target
+        WantedBy={wanted_by}
     """)
 
 
-def _systemd_action(action: str) -> str:
+def _systemd_action(action: str, *, system: bool) -> str:
     runtime = resolve_linux_service_runtime(argv_tail=["agent", "run-loop"])
+    is_root = os.geteuid() == 0
+    use_system_unit = system or is_root or (
+        action in {"start", "stop", "uninstall"} and _agent_system_unit_installed()
+    )
+    if system and not is_root:
+        executable = _find_netorium_executable()
+        raise AgentError(
+            "System agent service install requires root privileges. "
+            f"Run: {executable} agent service install --system"
+        )
+
+    if use_system_unit:
+        unit_file = _SYSTEMD_SYSTEM_DIR / f"{_SYSTEMD_SERVICE_NAME}.service"
+        if action == "install":
+            _write_systemd_unit_file(unit_file, _systemd_unit_content(runtime, system=True))
+            _run_service_cmd(["systemctl", "daemon-reload"])
+            _run_service_cmd(["systemctl", "enable", "--now", _SYSTEMD_SERVICE_NAME])
+            return (
+                f"[systemd system] Agent service installed: {unit_file}\n"
+                f"  Runs as: {runtime.service_user}\n"
+                f"  Status:  systemctl status {_SYSTEMD_SERVICE_NAME}\n"
+                f"  Logs:    journalctl -u {_SYSTEMD_SERVICE_NAME} -f\n"
+                f"  Stop:    systemctl stop {_SYSTEMD_SERVICE_NAME}"
+            )
+        if action == "start":
+            _run_service_cmd(["systemctl", "start", _SYSTEMD_SERVICE_NAME])
+            return f"[systemd system] Agent service started: {_SYSTEMD_SERVICE_NAME}"
+        if action == "stop":
+            _run_service_cmd(["systemctl", "stop", _SYSTEMD_SERVICE_NAME])
+            return f"[systemd system] Agent service stopped: {_SYSTEMD_SERVICE_NAME}"
+        if action == "uninstall":
+            _run_service_cmd_optional(["systemctl", "stop", _SYSTEMD_SERVICE_NAME])
+            _run_service_cmd_optional(["systemctl", "disable", _SYSTEMD_SERVICE_NAME])
+            if unit_file.exists():
+                unit_file.unlink()
+            _run_service_cmd_optional(["systemctl", "daemon-reload"])
+            return f"[systemd system] Agent service removed: {unit_file}"
+        raise AgentError(f"Unknown service action: {action}")
+
     unit_dir = _SYSTEMD_USER_DIR
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit_file = unit_dir / f"{_SYSTEMD_SERVICE_NAME}.service"
 
     if action == "install":
-        unit_file.write_text(_systemd_unit_content(runtime), encoding="utf-8")
+        unit_file.write_text(_systemd_unit_content(runtime, system=False), encoding="utf-8")
         _run_service_cmd(["systemctl", "--user", "daemon-reload"])
         _run_service_cmd(["systemctl", "--user", "enable", "--now", _SYSTEMD_SERVICE_NAME])
         username = os.environ.get("USER") or ""
@@ -430,7 +494,9 @@ def _systemd_action(action: str) -> str:
             f"[systemd --user] Agent service installed: {unit_file}\n"
             f"  Status:  systemctl --user status {_SYSTEMD_SERVICE_NAME}\n"
             f"  Logs:    journalctl --user -u {_SYSTEMD_SERVICE_NAME} -f\n"
-            f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}"
+            f"  Stop:    systemctl --user stop {_SYSTEMD_SERVICE_NAME}\n"
+            "  Note: Linux site policies need /etc/hosts access. Prefer "
+            "`netorium agent service install --system` for managed endpoints."
         )
 
     if action == "start":
@@ -450,6 +516,20 @@ def _systemd_action(action: str) -> str:
         return f"[systemd --user] Agent service removed: {unit_file}"
 
     raise AgentError(f"Unknown service action: {action}")
+
+
+def _write_systemd_unit_file(path: Path, content: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except PermissionError as exc:
+        raise AgentError(
+            f"Permission denied writing {path}. Run with sudo to install a system service."
+        ) from exc
+
+
+def _agent_system_unit_installed() -> bool:
+    return (_SYSTEMD_SYSTEM_DIR / f"{_SYSTEMD_SERVICE_NAME}.service").exists()
 
 
 # ─── macOS / launchd ──────────────────────────────────────────────────────────
@@ -928,6 +1008,42 @@ def _looks_like_connection_timeout(exc: requests.ConnectionError) -> bool:
             return True
         cause = getattr(cause, "__cause__", None)
     return False
+
+
+def _format_enrollment_failure(response: HttpResponse, *, controller_url: str) -> str:
+    raw_body = response.text.strip()
+    controller_error = _read_controller_error_message(raw_body)
+    lines = [
+        f"Controller enrollment failed with HTTP {response.status_code}: {controller_error}",
+    ]
+    if "invalid" in controller_error.lower() and "token" in controller_error.lower():
+        lines.extend(
+            [
+                "  Token troubleshooting:",
+                "    - Create a fresh token on the controller PC: netorium controller token create",
+                "    - Copy the token exactly once; it is shown only at creation time",
+                "    - Make sure the controller URL points to the same controller that created the token",
+                f"      Current URL: {controller_url}",
+            ]
+        )
+        parsed = urlparse(controller_url)
+        if parsed.hostname in {"127.0.0.1", "localhost"}:
+            lines.append(
+                "    - If this agent runs on another PC, do not use 127.0.0.1; use the controller PC's LAN IP"
+            )
+    return "\n".join(lines)
+
+
+def _read_controller_error_message(raw_body: str) -> str:
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        return raw_body or "unknown controller error"
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+    return raw_body or "unknown controller error"
 
 
 def _controller_unreachable_error(enroll_url: str, controller_url: str) -> AgentError:

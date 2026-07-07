@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Annotated
 
 import typer
@@ -74,8 +75,17 @@ def enroll(
     try:
         background_message = try_provision_agent_background_service()
     except AgentError as exc:
-        _fail(exc)
+        error_console.print(f"[yellow]Warning:[/yellow] {exc}")
+        background_message = (
+            "Agent enrolled, but the background service was not installed automatically.\n"
+            "  Run: netorium agent service install"
+        )
     console.print(background_message)
+    if sys.platform.startswith("linux"):
+        console.print(
+            "Linux endpoint policies need /etc/hosts access. For managed endpoints run:\n"
+            "  netorium agent service install --system"
+        )
 
     try:
         result = run_agent_once()
@@ -150,6 +160,23 @@ def update_check() -> None:
 
 
 app.add_typer(update_app, name="update")
+
+@service_app.command("install")
+def service_install(
+    system: Annotated[
+        bool,
+        typer.Option(
+            "--system",
+            help="Install a persistent system service (recommended on Linux endpoints).",
+        ),
+    ] = False,
+) -> None:
+    """Install the agent background service."""
+    try:
+        console.print(service_action("install", system=system))
+    except AgentError as exc:
+        _fail(exc)
+
 
 @service_app.command("start")
 def service_start() -> None:
